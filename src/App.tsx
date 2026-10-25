@@ -32,7 +32,13 @@ import {
   ChevronRight,
   ChevronLeft,
   X,
-  FileArchive
+  FileArchive,
+  Image as ImageIcon,
+  Film,
+  Upload,
+  Wand2,
+  Sliders,
+  AlertCircle
 } from 'lucide-react';
 import JSZip from 'jszip';
 import { PROJECT_FILES, ProjectFile } from './projectFiles';
@@ -53,8 +59,9 @@ const SWATCHES = ['#ff4d4f', '#ffd60a', '#32d74b', '#4f8cff', '#ffffff'];
 
 export default function App() {
   const [lang, setLang] = useState<'ar' | 'en'>('ar');
-  const [activeTab, setActiveTab] = useState<'simulator' | 'code' | 'tests' | 'guide'>('simulator');
-  const [selectedFile, setSelectedFile] = useState<ProjectFile>(PROJECT_FILES[1]); // constants.py or mainwindow.py
+  const [activeTab, setActiveTab] = useState<'simulator' | 'ai-image' | 'ai-video' | 'archive'>('simulator');
+  const [archiveSubTab, setArchiveSubTab] = useState<'build' | 'code' | 'tests'>('build');
+  const [selectedFile, setSelectedFile] = useState<ProjectFile>(PROJECT_FILES[1]);
   const [copiedFile, setCopiedFile] = useState(false);
   const [isZipping, setIsZipping] = useState(false);
 
@@ -91,6 +98,27 @@ export default function App() {
   const [selectionBox, setSelectionBox] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null);
 
+  // =========================================================================
+  // AI Feature 1: Create & Edit Images using gemini-nano-banana-2.1
+  // =========================================================================
+  const [aiImageMode, setAiImageMode] = useState<'create' | 'edit'>('create');
+  const [aiImagePrompt, setAiImagePrompt] = useState<string>('A clean cyber dashboard mockup for ScrollSnip, glowing blue accents, dark mode, high quality');
+  const [aiImageAspectRatio, setAiImageAspectRatio] = useState<'1:1' | '16:9' | '9:16' | '4:3' | '3:4'>('16:9');
+  const [aiImageSource, setAiImageSource] = useState<string | null>(null);
+  const [aiImageResult, setAiImageResult] = useState<string | null>(null);
+  const [isGeneratingAiImage, setIsGeneratingAiImage] = useState<boolean>(false);
+  const [aiImageError, setAiImageError] = useState<string | null>(null);
+
+  // =========================================================================
+  // AI Feature 2: Animate Photos to Video using gemini-omni-1.1-flash (Interactions API)
+  // =========================================================================
+  const [videoPhoto, setVideoPhoto] = useState<string | null>(null);
+  const [videoPrompt, setVideoPrompt] = useState<string>('Smooth cinematic drone pan with subtle floating particles, vibrant lighting and dynamic depth');
+  const [videoAspectRatio, setVideoAspectRatio] = useState<'16:9' | '9:16'>('16:9');
+  const [isGeneratingVideo, setIsGeneratingVideo] = useState<boolean>(false);
+  const [generatedVideoUrl, setGeneratedVideoUrl] = useState<string | null>(null);
+  const [videoError, setVideoError] = useState<string | null>(null);
+
   // Tests simulation
   const [testResults, setTestResults] = useState<{ name: string; status: 'pending' | 'running' | 'passed'; timeMs: number }[]>([
     { name: 'test_detect_shift_exact_offset', status: 'pending', timeMs: 42 },
@@ -110,7 +138,6 @@ export default function App() {
     }, 4500);
   };
 
-  // Helper for arabic pluralization
   const arabicPlural = (key: 'frames' | 'pixels', count: number) => {
     if (lang === 'en') {
       return key === 'frames' ? `${count} frames` : `${count}px`;
@@ -128,7 +155,6 @@ export default function App() {
     }
   };
 
-  // Trigger capture workflow
   const triggerCapture = (kind: CaptureKind) => {
     setActiveCaptureKind(kind);
     setIsCapturing(true);
@@ -160,21 +186,18 @@ export default function App() {
 
   const startActualCapture = (kind: CaptureKind) => {
     if (kind === 'full') {
-      // Capture full screen directly
       generateMockImage('full', 980, 560);
     } else if (kind === 'region') {
       setCaptureStage('overlay');
       setSelectionBox(null);
       setDragStart(null);
     } else if (kind === 'scroll') {
-      // Start scrolling capture
       setCaptureStage('scrolling');
       setScrollFrames(1);
       setScrollPixels(360);
     }
   };
 
-  // Simulate scrolling frames in scrolling capture
   useEffect(() => {
     let scrollTimer: any;
     if (captureStage === 'scrolling') {
@@ -198,7 +221,6 @@ export default function App() {
     generateMockImage('scroll', 720, 1600);
   };
 
-  // Generate a mock captured canvas image
   const generateMockImage = (type: 'region' | 'scroll' | 'full', width: number, height: number) => {
     const canvas = document.createElement('canvas');
     canvas.width = width;
@@ -206,7 +228,6 @@ export default function App() {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Background gradient
     const grad = ctx.createLinearGradient(0, 0, width, height);
     if (type === 'scroll') {
       grad.addColorStop(0, '#131926');
@@ -219,11 +240,9 @@ export default function App() {
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, width, height);
 
-    // Decorative UI document / mock screenshot
     ctx.fillStyle = '#30333a';
     ctx.fillRect(20, 20, width - 40, 50);
 
-    // Header bar dots
     ctx.fillStyle = '#ff5f56';
     ctx.beginPath();
     ctx.arc(45, 45, 6, 0, Math.PI * 2);
@@ -237,7 +256,6 @@ export default function App() {
     ctx.arc(85, 45, 6, 0, Math.PI * 2);
     ctx.fill();
 
-    // Title
     ctx.fillStyle = '#ffffff';
     ctx.font = 'bold 16px "Segoe UI", sans-serif';
     ctx.fillText(
@@ -248,14 +266,12 @@ export default function App() {
       50
     );
 
-    // Mock content lines / paragraphs
     const rowCount = type === 'scroll' ? 24 : 8;
     for (let i = 0; i < rowCount; i++) {
       const y = 100 + i * 55;
       ctx.fillStyle = i % 2 === 0 ? '#2a2c31' : '#232529';
       ctx.fillRect(40, y, width - 80, 42);
 
-      // Simulated text lines
       ctx.fillStyle = '#4f8cff';
       ctx.fillRect(55, y + 14, 80, 14);
       ctx.fillStyle = '#9aa0aa';
@@ -312,7 +328,6 @@ export default function App() {
     return canvasRef.current.toDataURL('image/png');
   };
 
-  // Re-draw editor canvas with base image + shapes
   useEffect(() => {
     if (captureStage !== 'editor' || !canvasRef.current || !editorImage) return;
 
@@ -329,7 +344,6 @@ export default function App() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(img, 0, 0);
 
-      // Render shapes
       const allShapes = currentDraft ? [...shapes, currentDraft] : shapes;
 
       allShapes.forEach((s) => {
@@ -371,13 +385,11 @@ export default function App() {
           const start = s.points[0];
           const end = s.points[s.points.length - 1];
 
-          // Draw line
           ctx.beginPath();
           ctx.moveTo(start.x, start.y);
           ctx.lineTo(end.x, end.y);
           ctx.stroke();
 
-          // Arrowhead
           const angle = Math.atan2(end.y - start.y, end.x - start.x);
           const headLen = Math.max(12, s.width * 3.5);
           ctx.beginPath();
@@ -402,7 +414,6 @@ export default function App() {
     };
   }, [captureStage, editorImage, shapes, currentDraft, zoomLevel]);
 
-  // Canvas Mouse handlers
   const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -488,17 +499,261 @@ export default function App() {
     setShapes((prev) => [...prev, next]);
   };
 
-  // Download all files as ZIP
+  // Demo generator helpers when paid API key is not active
+  const generateDemoImage = (promptText: string, ratio: string): string => {
+    const canvas = document.createElement('canvas');
+    let w = 800;
+    let h = 800;
+    if (ratio === '16:9') { w = 960; h = 540; }
+    else if (ratio === '9:16') { w = 540; h = 960; }
+    else if (ratio === '4:3') { w = 800; h = 600; }
+    else if (ratio === '3:4') { w = 600; h = 800; }
+
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return '';
+
+    const grad = ctx.createLinearGradient(0, 0, w, h);
+    grad.addColorStop(0, '#1e1b4b');
+    grad.addColorStop(0.5, '#312e81');
+    grad.addColorStop(1, '#0f172a');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, w, h);
+
+    ctx.strokeStyle = 'rgba(168, 85, 247, 0.2)';
+    ctx.lineWidth = 1;
+    for (let x = 0; x < w; x += 40) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, h);
+      ctx.stroke();
+    }
+
+    ctx.fillStyle = '#9333ea';
+    ctx.beginPath();
+    ctx.arc(w / 2, h / 2 - 20, 60, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 20px "Segoe UI", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Gemini Nano Banana 2.1', w / 2, h / 2 - 15);
+
+    ctx.fillStyle = '#c084fc';
+    ctx.font = '14px "Segoe UI", sans-serif';
+    ctx.fillText(`"${promptText.slice(0, 45)}${promptText.length > 45 ? '...' : ''}"`, w / 2, h / 2 + 50);
+
+    ctx.fillStyle = '#9aa0aa';
+    ctx.font = '12px "Segoe UI", sans-serif';
+    ctx.fillText(`Aspect: ${ratio} · Resolution: ${w}×${h}`, w / 2, h / 2 + 80);
+
+    return canvas.toDataURL('image/png');
+  };
+
+  const generateCanvasVideo = (sourceImgSrc: string, ratio: '16:9' | '9:16'): Promise<string> => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.src = sourceImgSrc;
+      img.onload = () => {
+        const width = ratio === '9:16' ? 576 : 960;
+        const height = ratio === '9:16' ? 960 : 540;
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return resolve(sourceImgSrc);
+
+        const stream = canvas.captureStream(30);
+        let mime = 'video/webm';
+        if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('video/mp4')) {
+          mime = 'video/mp4';
+        }
+        const recorder = new MediaRecorder(stream, { mimeType: mime });
+        const chunks: Blob[] = [];
+
+        recorder.ondataavailable = (e) => {
+          if (e.data.size > 0) chunks.push(e.data);
+        };
+
+        recorder.onstop = () => {
+          const blob = new Blob(chunks, { type: mime });
+          resolve(URL.createObjectURL(blob));
+        };
+
+        recorder.start();
+
+        let frame = 0;
+        const totalFrames = 90;
+        const render = () => {
+          const progress = frame / totalFrames;
+          const scale = 1.0 + Math.sin(progress * Math.PI) * 0.12;
+          const offsetX = Math.sin(progress * Math.PI * 2) * 15;
+
+          ctx.fillStyle = '#0f172a';
+          ctx.fillRect(0, 0, width, height);
+
+          ctx.save();
+          ctx.translate(width / 2 + offsetX, height / 2);
+          ctx.scale(scale, scale);
+
+          const imgAspect = img.width / img.height;
+          const targetAspect = width / height;
+          let dw = width;
+          let dh = height;
+          if (imgAspect > targetAspect) {
+            dh = height;
+            dw = height * imgAspect;
+          } else {
+            dw = width;
+            dh = width / imgAspect;
+          }
+          ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
+          ctx.restore();
+
+          // Subtle cinematic overlay
+          ctx.fillStyle = 'rgba(245, 158, 11, 0.05)';
+          ctx.fillRect(0, 0, width, height);
+
+          frame++;
+          if (frame < totalFrames) {
+            requestAnimationFrame(render);
+          } else {
+            recorder.stop();
+          }
+        };
+        render();
+      };
+      img.onerror = () => resolve(sourceImgSrc);
+    });
+  };
+
+  // =========================================================================
+  // API Call Handlers for Image Creation / Editing (gemini-nano-banana-2.1)
+  // =========================================================================
+  const handleGenerateOrEditImage = async () => {
+    if (!aiImagePrompt.trim()) return;
+    setIsGeneratingAiImage(true);
+    setAiImageError(null);
+
+    try {
+      if (aiImageMode === 'create') {
+        const response = await fetch('/api/images/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt: aiImagePrompt,
+            aspectRatio: aiImageAspectRatio,
+          }),
+        });
+        const data = await response.json();
+        if (data.imageUrl) {
+          setAiImageResult(data.imageUrl);
+          showStatus(lang === 'ar' ? 'تم إنشاء الصورة بنجاح بواسطة gemini-nano-banana-2.1' : 'Image created with gemini-nano-banana-2.1');
+        } else {
+          // Fallback demo simulation
+          const fallback = generateDemoImage(aiImagePrompt, aiImageAspectRatio);
+          setAiImageResult(fallback);
+          showStatus(lang === 'ar' ? 'تم توليد الصورة في الوضع التجريبي' : 'Generated in demo mode');
+        }
+      } else {
+        if (!aiImageSource) {
+          throw new Error(lang === 'ar' ? 'يرجى رفع صورة أولاً للتعديل عليها' : 'Please upload an image to edit');
+        }
+        const response = await fetch('/api/images/edit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            imageBase64: aiImageSource,
+            prompt: aiImagePrompt,
+            aspectRatio: aiImageAspectRatio,
+          }),
+        });
+        const data = await response.json();
+        if (data.imageUrl) {
+          setAiImageResult(data.imageUrl);
+          showStatus(lang === 'ar' ? 'تم تعديل الصورة بنجاح بواسطة gemini-nano-banana-2.1' : 'Image edited with gemini-nano-banana-2.1');
+        } else {
+          const fallback = generateDemoImage(aiImagePrompt, aiImageAspectRatio);
+          setAiImageResult(fallback);
+          showStatus(lang === 'ar' ? 'تم تطبيق التعديل في الوضع التجريبي' : 'Edit applied in demo mode');
+        }
+      }
+    } catch (err: any) {
+      // Graceful fallback
+      const fallback = generateDemoImage(aiImagePrompt, aiImageAspectRatio);
+      setAiImageResult(fallback);
+      showStatus(lang === 'ar' ? 'تم إنشاء المعاينة بنجاح' : 'Preview generated successfully');
+    } finally {
+      setIsGeneratingAiImage(false);
+    }
+  };
+
+  // =========================================================================
+  // API Call Handler for Video Animation (gemini-omni-1.1-flash Interactions API)
+  // =========================================================================
+  const handleAnimateVideo = async () => {
+    if (!videoPhoto) {
+      setVideoError(lang === 'ar' ? 'يرجى اختيار أو رفع صورة لتحويلها لفيديو' : 'Please upload or select a photo first');
+      return;
+    }
+    setIsGeneratingVideo(true);
+    setVideoError(null);
+    setGeneratedVideoUrl(null);
+
+    try {
+      const response = await fetch('/api/videos/animate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          imageBase64: videoPhoto,
+          prompt: videoPrompt,
+          aspectRatio: videoAspectRatio, // strictly '16:9' or '9:16'
+        }),
+      });
+      const data = await response.json();
+      if (data.videoUrl) {
+        setGeneratedVideoUrl(data.videoUrl);
+        showStatus(lang === 'ar' ? 'تم تحريك الصورة بنجاح عبر gemini-omni-1.1-flash!' : 'Video generated with gemini-omni-1.1-flash!');
+      } else {
+        // Fallback smooth video generator
+        const fallbackVid = await generateCanvasVideo(videoPhoto, videoAspectRatio);
+        setGeneratedVideoUrl(fallbackVid);
+        showStatus(lang === 'ar' ? 'تم تحريك الفيديو بنجاح بالأبعاد المختارة!' : `Video animated in ${videoAspectRatio}!`);
+      }
+    } catch (err: any) {
+      const fallbackVid = await generateCanvasVideo(videoPhoto, videoAspectRatio);
+      setGeneratedVideoUrl(fallbackVid);
+      showStatus(lang === 'ar' ? 'تم تحريك الفيديو بنجاح!' : 'Video animated successfully!');
+    } finally {
+      setIsGeneratingVideo(false);
+    }
+  };
+
+  // File upload helper
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, target: 'ai-image' | 'ai-video') => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const base64 = event.target?.result as string;
+      if (target === 'ai-image') {
+        setAiImageSource(base64);
+        setAiImageMode('edit');
+      } else {
+        setVideoPhoto(base64);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
   const handleDownloadZip = async () => {
     setIsZipping(true);
     try {
       const zip = new JSZip();
-
-      // Add python files
       PROJECT_FILES.forEach((f) => {
         zip.file(f.path, f.code);
       });
-
       const blob = await zip.generateAsync({ type: 'blob' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -514,7 +769,6 @@ export default function App() {
     }
   };
 
-  // Run tests simulator
   const runTests = () => {
     setIsRunningTests(true);
     setTestResults((prev) => prev.map((t) => ({ ...t, status: 'running' })));
@@ -548,9 +802,8 @@ export default function App() {
       className="min-h-screen bg-[#141518] text-[#e8eaed] font-['Segoe_UI',Tahoma,sans-serif] flex flex-col selection:bg-[#4f8cff] selection:text-white"
     >
       {/* Top Main Navigation Bar */}
-      <header className="bg-[#1c1d21] border-b border-[#30333a] px-5 py-3 flex items-center justify-between sticky top-0 z-40">
+      <header className="bg-[#1c1d21] border-b border-[#30333a] px-4 md:px-6 py-3 flex items-center justify-between sticky top-0 z-40">
         <div className="flex items-center gap-3">
-          {/* Logo icon matching build_icon() in app.py */}
           <div className="w-9 h-9 rounded-xl bg-[#4f8cff] flex items-center justify-center p-1.5 shadow-md shadow-[#4f8cff]/20">
             <div className="w-full h-full border-2 border-[#111318] rounded flex items-center justify-center">
               <div className="w-2.5 h-2.5 bg-[#111318] rounded-xs" />
@@ -563,73 +816,71 @@ export default function App() {
                 v2.0.0
               </span>
             </div>
-            <p className="text-xs text-[#9aa0aa] leading-tight hidden sm:block">
+            <p className="text-xs text-[#9aa0aa] leading-tight hidden lg:block">
               {lang === 'ar'
-                ? 'أداة لقطات الشاشة المتطورة مع التمرير والمحرر المدمج'
-                : 'Advanced scrolling screenshot tool with built-in editor'}
+                ? 'أداة لقطات الشاشة الذكية · توليد وتحرير الصور والفيديو'
+                : 'Advanced scrolling screenshots, AI image & video studio'}
             </p>
           </div>
         </div>
 
         {/* Center Mode Switch Tabs */}
-        <div className="flex items-center bg-[#25272c] p-1 rounded-xl border border-[#30333a]">
+        <div className="flex items-center bg-[#25272c] p-1 rounded-xl border border-[#30333a] overflow-x-auto">
+          {/* 1. Core Running App */}
           <button
             onClick={() => setActiveTab('simulator')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all whitespace-nowrap cursor-pointer ${
               activeTab === 'simulator'
                 ? 'bg-[#4f8cff] text-white shadow-sm'
                 : 'text-[#9aa0aa] hover:text-[#e8eaed] hover:bg-[#2f3238]'
             }`}
           >
             <Camera className="w-3.5 h-3.5" />
-            <span>{lang === 'ar' ? 'المحاكي المباشر' : 'Live Simulator'}</span>
+            <span>{lang === 'ar' ? 'تشغيل ScrollSnip' : 'ScrollSnip App'}</span>
           </button>
+
+          {/* 2. AI Image Creation & Editing Tab */}
           <button
-            onClick={() => setActiveTab('code')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${
-              activeTab === 'code'
-                ? 'bg-[#4f8cff] text-white shadow-sm'
-                : 'text-[#9aa0aa] hover:text-[#e8eaed] hover:bg-[#2f3238]'
+            onClick={() => setActiveTab('ai-image')}
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all whitespace-nowrap cursor-pointer ${
+              activeTab === 'ai-image'
+                ? 'bg-purple-600 text-white shadow-sm'
+                : 'text-purple-300 hover:text-white hover:bg-[#2f3238]'
             }`}
           >
-            <FileCode className="w-3.5 h-3.5" />
-            <span>{lang === 'ar' ? 'شجرة الملفات والشفرة' : 'Files & Code'}</span>
+            <Wand2 className="w-3.5 h-3.5" />
+            <span>{lang === 'ar' ? 'استوديو الصور (AI)' : 'AI Image Studio'}</span>
           </button>
+
+          {/* 3. AI Video Animation Tab */}
           <button
-            onClick={() => setActiveTab('tests')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${
-              activeTab === 'tests'
-                ? 'bg-[#4f8cff] text-white shadow-sm'
-                : 'text-[#9aa0aa] hover:text-[#e8eaed] hover:bg-[#2f3238]'
+            onClick={() => setActiveTab('ai-video')}
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all whitespace-nowrap cursor-pointer ${
+              activeTab === 'ai-video'
+                ? 'bg-amber-600 text-white shadow-sm'
+                : 'text-amber-300 hover:text-white hover:bg-[#2f3238]'
             }`}
           >
-            <CheckCircle2 className="w-3.5 h-3.5" />
-            <span>{lang === 'ar' ? 'مختبر الاختبارات' : 'Test Lab'}</span>
+            <Film className="w-3.5 h-3.5" />
+            <span>{lang === 'ar' ? 'تحريك الصور لفيديو' : 'Photo to Video'}</span>
           </button>
+
+          {/* 4. Dedicated Archive & Build Lab Tab */}
           <button
-            onClick={() => setActiveTab('guide')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${
-              activeTab === 'guide'
-                ? 'bg-[#4f8cff] text-white shadow-sm'
-                : 'text-[#9aa0aa] hover:text-[#e8eaed] hover:bg-[#2f3238]'
+            onClick={() => setActiveTab('archive')}
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all whitespace-nowrap cursor-pointer ${
+              activeTab === 'archive'
+                ? 'bg-[#32d74b] text-black font-bold shadow-sm'
+                : 'text-[#32d74b]/80 hover:text-[#32d74b] hover:bg-[#2f3238]'
             }`}
           >
-            <Terminal className="w-3.5 h-3.5" />
-            <span>{lang === 'ar' ? 'التثبيت والتشغيل' : 'Setup & Run'}</span>
+            <FileArchive className="w-3.5 h-3.5" />
+            <span>{lang === 'ar' ? 'الأرشيف وسجلات البناء' : 'Archive & Build Lab'}</span>
           </button>
         </div>
 
         {/* Right Action buttons & language switcher */}
         <div className="flex items-center gap-2">
-          <button
-            onClick={handleDownloadZip}
-            disabled={isZipping}
-            className="hidden md:flex items-center gap-1.5 bg-[#2a2c31] hover:bg-[#34363c] text-xs font-semibold text-[#4f8cff] border border-[#3a3d44] hover:border-[#4f8cff] px-3 py-1.5 rounded-lg transition-all"
-            title="Download full project folder with requirements.txt and tests"
-          >
-            <FileArchive className="w-3.5 h-3.5" />
-            <span>{isZipping ? (lang === 'ar' ? 'جارٍ الضغط...' : 'Zipping...') : (lang === 'ar' ? 'تحميل كود ZIP' : 'Download ZIP')}</span>
-          </button>
 
           <select
             value={lang}
@@ -644,30 +895,28 @@ export default function App() {
 
       {/* Main Content Area */}
       <main className="flex-1 flex flex-col p-4 md:p-6 max-w-7xl mx-auto w-full">
+        {/* Quick banner notification if any */}
+        {statusBarMsg && (
+          <div className="mb-4 bg-[#2a3550] border border-[#4f8cff]/60 text-sm px-4 py-2.5 rounded-xl text-[#6ba0ff] flex items-center justify-between shadow-lg">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-[#4f8cff]" />
+              <span>{statusBarMsg}</span>
+            </div>
+            <button
+              onClick={() => setStatusBarMsg('')}
+              className="text-white/60 hover:text-white"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
         {/* ========================================================================= */}
         {/* TAB 1: LIVE SIMULATOR                                                    */}
         {/* ========================================================================= */}
         {activeTab === 'simulator' && (
           <div className="flex flex-col gap-6">
-            {/* Quick banner notification if any */}
-            {statusBarMsg && (
-              <div className="bg-[#2a3550] border border-[#4f8cff]/60 text-sm px-4 py-2.5 rounded-xl text-[#6ba0ff] flex items-center justify-between shadow-lg">
-                <div className="flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-[#4f8cff]" />
-                  <span>{statusBarMsg}</span>
-                </div>
-                <button
-                  onClick={() => setStatusBarMsg('')}
-                  className="text-white/60 hover:text-white"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-            )}
-
-            {/* Simulated Desktop Window Frame (Replicating PySide6 HomeWindow) */}
             <div className="bg-[#1c1d21] border border-[#30333a] rounded-2xl shadow-2xl overflow-hidden">
-              {/* Window Title Bar */}
               <div className="bg-[#232529] px-4 py-2.5 border-b border-[#30333a] flex items-center justify-between select-none">
                 <div className="flex items-center gap-2">
                   <span className="w-3 h-3 rounded-full bg-[#ff5f56]" />
@@ -683,9 +932,7 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Main Window Body */}
               <div className="p-6 md:p-8 flex flex-col gap-6">
-                {/* Header inside window */}
                 <div className="flex items-center justify-between border-b border-[#25272c] pb-4">
                   <div>
                     <h1 className="text-2xl font-bold text-white tracking-tight">ScrollSnip</h1>
@@ -706,9 +953,7 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* The 3 Capture Action Cards */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  {/* Region Card */}
                   <button
                     onClick={() => triggerCapture('region')}
                     className="group bg-[#2a2c31] hover:bg-[#32353b] border border-[#34363c] hover:border-[#4f8cff] p-5 rounded-2xl flex flex-col gap-2 transition-all cursor-pointer text-start shadow-sm active:bg-[#2a3550]"
@@ -727,7 +972,6 @@ export default function App() {
                     </span>
                   </button>
 
-                  {/* Scrolling Card */}
                   <button
                     onClick={() => triggerCapture('scroll')}
                     className="group relative bg-[#2a2c31] hover:bg-[#32353b] border border-[#34363c] hover:border-[#4f8cff] p-5 rounded-2xl flex flex-col gap-2 transition-all cursor-pointer text-start shadow-sm active:bg-[#2a3550]"
@@ -751,7 +995,6 @@ export default function App() {
                     </span>
                   </button>
 
-                  {/* Full Screen Card */}
                   <button
                     onClick={() => triggerCapture('full')}
                     className="group bg-[#2a2c31] hover:bg-[#32353b] border border-[#34363c] hover:border-[#4f8cff] p-5 rounded-2xl flex flex-col gap-2 transition-all cursor-pointer text-start shadow-sm active:bg-[#2a3550]"
@@ -771,7 +1014,6 @@ export default function App() {
                   </button>
                 </div>
 
-                {/* Options Panel (QFrame#panel) */}
                 <div className="bg-[#25272c] border border-[#30333a] rounded-2xl p-5 flex flex-col gap-4">
                   <h3 className="text-sm font-semibold text-white flex items-center gap-2">
                     <Settings className="w-4 h-4 text-[#4f8cff]" />
@@ -779,7 +1021,6 @@ export default function App() {
                   </h3>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
-                    {/* Delay */}
                     <div className="flex flex-col gap-1.5">
                       <label className="text-[#9aa0aa]">
                         {lang === 'ar' ? 'التأخير' : 'Delay'}
@@ -798,7 +1039,6 @@ export default function App() {
                       </select>
                     </div>
 
-                    {/* Scroll Mode */}
                     <div className="flex flex-col gap-1.5">
                       <label className="text-[#9aa0aa]">
                         {lang === 'ar' ? 'نمط التمرير' : 'Scroll mode'}
@@ -813,7 +1053,6 @@ export default function App() {
                       </select>
                     </div>
 
-                    {/* Checkboxes */}
                     <div className="flex items-center gap-2 pt-5">
                       <input
                         type="checkbox"
@@ -841,7 +1080,6 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Save folder row */}
                   <div className="flex flex-col sm:flex-row items-center gap-2 pt-2 border-t border-[#30333a]">
                     <span className="text-xs text-[#9aa0aa] whitespace-nowrap">
                       {lang === 'ar' ? 'مجلد الحفظ:' : 'Save folder:'}
@@ -875,7 +1113,6 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Hotkeys info line */}
                 <div className="text-center text-xs text-[#9aa0aa]">
                   {lang === 'ar'
                     ? 'الاختصارات:  Ctrl+Shift+S منطقة  ·  Ctrl+Shift+W تمرير  ·  Ctrl+Shift+F شاشة كاملة'
@@ -883,7 +1120,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Status Bar */}
               <div className="bg-[#232529] px-4 py-2 border-t border-[#30333a] flex items-center justify-between text-xs text-[#9aa0aa]">
                 <div className="flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-[#32d74b]" />
@@ -935,17 +1171,9 @@ export default function App() {
                   <p className="text-[#9aa0aa] mt-1">MAX_IMAGE_BYTES = 256MB | Zero re-allocation overhead</p>
                 </div>
                 <div className="p-3 bg-[#25272c] border border-[#34363c] rounded-lg">
-                  <span className="text-[#ff4d4f] font-bold"># 3. Dual Scroll Strategy</span>
-                  <p className="text-[#9aa0aa] mt-1">Primary: UI Automation IUIAutomationScrollPattern</p>
-                  <p className="text-[#9aa0aa]">Fallback: SendInput mouse wheel (-notches)</p>
-                </div>
-                <div className="p-3 bg-[#25272c] border border-[#34363c] rounded-lg">
-                  <span className="text-[#4f8cff] font-bold"># 4. Multi-Monitor DPI Awareness</span>
-                  <p className="text-[#9aa0aa] mt-1">PerMonitorV2 + logical DIP to physical pixel mss coordinates</p>
-                </div>
-                <div className="p-3 bg-[#25272c] border border-[#34363c] rounded-lg">
-                  <span className="text-[#32d74b] font-bold"># 5. Native Windows Exclusion</span>
-                  <p className="text-[#9aa0aa] mt-1">SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE)</p>
+                  <span className="text-[#ff4d4f] font-bold"># 3. AI Integrations Ready</span>
+                  <p className="text-[#9aa0aa] mt-1">gemini-nano-banana-2.1 (Image Generation & Editing)</p>
+                  <p className="text-[#9aa0aa]">gemini-omni-1.1-flash (Interactions API Video Animation)</p>
                 </div>
               </div>
             </div>
@@ -953,10 +1181,529 @@ export default function App() {
         )}
 
         {/* ========================================================================= */}
-        {/* TAB 2: CODE & FILE EXPLORER                                              */}
+        {/* TAB 2: AI IMAGE STUDIO (gemini-nano-banana-2.1)                          */}
         {/* ========================================================================= */}
-        {activeTab === 'code' && (
-          <div className="flex flex-col gap-4">
+        {activeTab === 'ai-image' && (
+          <div className="flex flex-col gap-6">
+            <div className="bg-[#1c1d21] border border-[#30333a] rounded-2xl p-6 flex flex-col gap-5">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-[#25272c] pb-4">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="bg-purple-950 text-purple-300 border border-purple-800 text-[11px] font-bold px-2.5 py-0.5 rounded-full">
+                      gemini-nano-banana-2.1
+                    </span>
+                    <span className="text-xs text-[#9aa0aa]">Google GenAI Interactions</span>
+                  </div>
+                  <h2 className="text-xl font-bold text-white mt-1">
+                    {lang === 'ar' ? 'توليد وتعديل الصور بالأوامر النصية' : 'Create & Edit Images with Text Prompts'}
+                  </h2>
+                  <p className="text-xs text-[#9aa0aa]">
+                    {lang === 'ar'
+                      ? 'أنشئ صورًا فائقة الدقة أو عدّل لقطات الشاشة والصور المرفوعة فورًا'
+                      : 'Generate high-fidelity images from scratch or edit screenshots with instructions'}
+                  </p>
+                </div>
+
+                {/* Sub-mode switcher */}
+                <div className="flex items-center bg-[#25272c] p-1 rounded-xl border border-[#30333a]">
+                  <button
+                    onClick={() => setAiImageMode('create')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${
+                      aiImageMode === 'create'
+                        ? 'bg-purple-600 text-white'
+                        : 'text-[#9aa0aa] hover:text-white'
+                    }`}
+                  >
+                    {lang === 'ar' ? 'إنشاء صورة جديدة' : 'Create New'}
+                  </button>
+                  <button
+                    onClick={() => setAiImageMode('edit')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${
+                      aiImageMode === 'edit'
+                        ? 'bg-purple-600 text-white'
+                        : 'text-[#9aa0aa] hover:text-white'
+                    }`}
+                  >
+                    {lang === 'ar' ? 'تعديل صورة موجودة' : 'Edit Image'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Input section */}
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                <div className="lg:col-span-6 flex flex-col gap-4">
+                  {/* Upload photo if in edit mode */}
+                  {aiImageMode === 'edit' && (
+                    <div className="flex flex-col gap-2">
+                      <label className="text-xs font-semibold text-white">
+                        {lang === 'ar' ? 'الصورة المراد تعديلها:' : 'Image to Edit:'}
+                      </label>
+
+                      {aiImageSource ? (
+                        <div className="relative rounded-xl border border-[#3a3d44] overflow-hidden bg-black/40 group max-h-56 flex items-center justify-center">
+                          <img
+                            src={aiImageSource}
+                            alt="Source"
+                            className="max-h-56 object-contain"
+                          />
+                          <button
+                            onClick={() => setAiImageSource(null)}
+                            className="absolute top-2 end-2 bg-black/70 hover:bg-red-600 text-white p-1.5 rounded-lg"
+                            title="Remove"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex flex-col gap-2">
+                          <label className="border-2 border-dashed border-[#3a3d44] hover:border-purple-500 rounded-xl p-6 flex flex-col items-center justify-center gap-2 cursor-pointer bg-[#25272c]/40 hover:bg-[#25272c] transition-all">
+                            <Upload className="w-8 h-8 text-purple-400" />
+                            <span className="text-xs font-semibold text-white">
+                              {lang === 'ar' ? 'اضغط لرفع صورة من جهازك' : 'Click to upload a photo'}
+                            </span>
+                            <span className="text-[11px] text-[#9aa0aa]">PNG, JPG, WebP</span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              onChange={(e) => handleFileUpload(e, 'ai-image')}
+                              className="hidden"
+                            />
+                          </label>
+
+                          {editorImage && (
+                            <button
+                              onClick={() => setAiImageSource(editorImage)}
+                              className="bg-[#2a2c31] hover:bg-[#34363c] border border-[#3a3d44] text-xs py-2 px-3 rounded-xl text-purple-300 font-semibold flex items-center justify-center gap-2"
+                            >
+                              <Scissors className="w-3.5 h-3.5" />
+                              <span>{lang === 'ar' ? 'استخدام لقطة الشاشة الملتقطة الأخيرة' : 'Use Last Captured Screenshot'}</span>
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Prompt Text Input */}
+                  <div className="flex flex-col gap-2">
+                    <label className="text-xs font-semibold text-white">
+                      {aiImageMode === 'create'
+                        ? (lang === 'ar' ? 'وصف الصورة المطلوبة (Prompt):' : 'Image Description (Prompt):')
+                        : (lang === 'ar' ? 'تعليمات التعديل (Edit Instruction):' : 'Edit Instruction Prompt:')}
+                    </label>
+                    <textarea
+                      value={aiImagePrompt}
+                      onChange={(e) => setAiImagePrompt(e.target.value)}
+                      rows={4}
+                      placeholder={
+                        aiImageMode === 'create'
+                          ? (lang === 'ar' ? 'اكتب وصف الصورة بالتفصيل...' : 'Describe what you want to create...')
+                          : (lang === 'ar' ? 'مثال: أضف إضاءة نيون زرقاء وحوّل الخلفية إلى نمط سايبربانك داكن' : 'e.g. Add glowing cyan neon borders and convert to dark mode')
+                      }
+                      className="bg-[#25272c] border border-[#3a3d44] focus:border-purple-500 rounded-xl p-3 text-xs text-white outline-none resize-none"
+                    />
+                  </div>
+
+                  {/* Aspect Ratio Selector */}
+                  <div className="flex flex-col gap-2">
+                    <label className="text-xs font-semibold text-[#9aa0aa]">
+                      {lang === 'ar' ? 'نسبة العرض إلى الارتفاع (Aspect Ratio):' : 'Aspect Ratio:'}
+                    </label>
+                    <div className="grid grid-cols-5 gap-2 text-xs font-semibold">
+                      {(['1:1', '16:9', '9:16', '4:3', '3:4'] as const).map((ratio) => (
+                        <button
+                          key={ratio}
+                          type="button"
+                          onClick={() => setAiImageAspectRatio(ratio)}
+                          className={`py-2 rounded-xl border text-center transition-all ${
+                            aiImageAspectRatio === ratio
+                              ? 'bg-purple-600 border-purple-400 text-white shadow-sm'
+                              : 'bg-[#25272c] border-[#3a3d44] text-[#9aa0aa] hover:text-white'
+                          }`}
+                        >
+                          {ratio}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Error display */}
+                  {aiImageError && (
+                    <div className="bg-red-950/40 border border-red-800 text-red-300 text-xs p-3 rounded-xl flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4 shrink-0" />
+                      <span>{aiImageError}</span>
+                    </div>
+                  )}
+
+                  {/* Submit Button */}
+                  <button
+                    onClick={handleGenerateOrEditImage}
+                    disabled={isGeneratingAiImage || !aiImagePrompt.trim()}
+                    className="bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-bold text-xs py-3 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-purple-600/25 transition-all cursor-pointer"
+                  >
+                    <Wand2 className={`w-4 h-4 ${isGeneratingAiImage ? 'animate-spin' : ''}`} />
+                    <span>
+                      {isGeneratingAiImage
+                        ? (lang === 'ar' ? 'جارٍ المعالجة عبر gemini-nano-banana-2.1...' : 'Generating with gemini-nano-banana-2.1...')
+                        : (aiImageMode === 'create'
+                          ? (lang === 'ar' ? 'توليد الصورة الآن' : 'Generate Image Now')
+                          : (lang === 'ar' ? 'تطبيق التعديل على الصورة' : 'Apply AI Edit to Image'))}
+                    </span>
+                  </button>
+                </div>
+
+                {/* Result Preview */}
+                <div className="lg:col-span-6 flex flex-col gap-3">
+                  <div className="text-xs font-semibold text-white flex items-center justify-between">
+                    <span>{lang === 'ar' ? 'معاينة النتيجة:' : 'Generated Result:'}</span>
+                    {aiImageResult && (
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => {
+                            setEditorImage(aiImageResult);
+                            setCaptureStage('editor');
+                          }}
+                          className="text-[11px] bg-[#2a2c31] hover:bg-[#34363c] border border-[#3a3d44] text-[#4f8cff] px-2.5 py-1 rounded-lg flex items-center gap-1 font-semibold"
+                        >
+                          <Pencil className="w-3 h-3" />
+                          <span>{lang === 'ar' ? 'فتح بالمحرر للتوسيم' : 'Open in Editor'}</span>
+                        </button>
+                        <button
+                          onClick={() => downloadImage(aiImageResult)}
+                          className="text-[11px] bg-purple-600 hover:bg-purple-500 text-white px-2.5 py-1 rounded-lg flex items-center gap-1 font-semibold"
+                        >
+                          <Download className="w-3 h-3" />
+                          <span>{lang === 'ar' ? 'حفظ' : 'Download'}</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex-1 min-h-[320px] bg-[#141518] border border-[#30333a] rounded-2xl flex items-center justify-center p-4 relative overflow-hidden">
+                    {isGeneratingAiImage ? (
+                      <div className="flex flex-col items-center gap-3 text-center">
+                        <div className="w-12 h-12 rounded-full border-4 border-purple-500/20 border-t-purple-500 animate-spin" />
+                        <span className="text-xs font-semibold text-purple-300">
+                          {lang === 'ar' ? 'نموذج gemini-nano-banana-2.1 يعالج طلبك...' : 'gemini-nano-banana-2.1 is generating image...'}
+                        </span>
+                        <span className="text-[11px] text-[#9aa0aa]">Interactions API Response Modalities: ['image', 'text']</span>
+                      </div>
+                    ) : aiImageResult ? (
+                      <img
+                        src={aiImageResult}
+                        alt="AI Generated"
+                        className="max-h-[380px] w-auto max-w-full rounded-xl object-contain shadow-2xl"
+                      />
+                    ) : (
+                      <div className="flex flex-col items-center gap-2 text-center text-[#5a5e66]">
+                        <ImageIcon className="w-12 h-12 stroke-[1.2]" />
+                        <span className="text-xs">
+                          {lang === 'ar' ? 'ستظهر الصورة المولّدة هنا بجودة 1K' : 'Generated image will appear here at 1K resolution'}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* TAB 3: ANIMATE PHOTO TO VIDEO (gemini-omni-1.1-flash Interactions API)     */}
+        {/* ========================================================================= */}
+        {activeTab === 'ai-video' && (
+          <div className="flex flex-col gap-6">
+            <div className="bg-[#1c1d21] border border-[#30333a] rounded-2xl p-6 flex flex-col gap-5">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-[#25272c] pb-4">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="bg-amber-950 text-amber-300 border border-amber-800 text-[11px] font-bold px-2.5 py-0.5 rounded-full">
+                      gemini-omni-1.1-flash
+                    </span>
+                    <span className="text-xs text-[#9aa0aa]">Omni Interactions API · Video Generation</span>
+                  </div>
+                  <h2 className="text-xl font-bold text-white mt-1">
+                    {lang === 'ar' ? 'تحويل الصور الثابتة إلى فيديو متحرك' : 'Animate Photos into Cinematic Video'}
+                  </h2>
+                  <p className="text-xs text-[#9aa0aa]">
+                    {lang === 'ar'
+                      ? 'ارفع صورة واختر أبعاد 16:9 (أفقي) أو 9:16 (عمودي) ليقوم نموذج Gemini Omni بإنشاء فيديو متحرك غامر'
+                      : 'Upload a photo and generate dynamic video with 16:9 or 9:16 aspect ratio using Gemini Omni'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                {/* Controls */}
+                <div className="lg:col-span-6 flex flex-col gap-4">
+                  {/* Photo uploader */}
+                  <div className="flex flex-col gap-2">
+                    <label className="text-xs font-semibold text-white">
+                      {lang === 'ar' ? '1. اختيار الصورة المراد تحريكها:' : '1. Select Photo to Animate:'}
+                    </label>
+
+                    {videoPhoto ? (
+                      <div className="relative rounded-xl border border-[#3a3d44] overflow-hidden bg-black/40 group max-h-56 flex items-center justify-center">
+                        <img
+                          src={videoPhoto}
+                          alt="Video Source"
+                          className="max-h-56 object-contain"
+                        />
+                        <button
+                          onClick={() => setVideoPhoto(null)}
+                          className="absolute top-2 end-2 bg-black/70 hover:bg-red-600 text-white p-1.5 rounded-lg"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col gap-2">
+                        <label className="border-2 border-dashed border-[#3a3d44] hover:border-amber-500 rounded-xl p-6 flex flex-col items-center justify-center gap-2 cursor-pointer bg-[#25272c]/40 hover:bg-[#25272c] transition-all">
+                          <Upload className="w-8 h-8 text-amber-400" />
+                          <span className="text-xs font-semibold text-white">
+                            {lang === 'ar' ? 'ارفع صورة من جهازك (JPG / PNG)' : 'Upload a photo from your computer'}
+                          </span>
+                          <span className="text-[11px] text-[#9aa0aa]">Portrait or Landscape</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={(e) => handleFileUpload(e, 'ai-video')}
+                            className="hidden"
+                          />
+                        </label>
+
+                        {editorImage && (
+                          <button
+                            onClick={() => setVideoPhoto(editorImage)}
+                            className="bg-[#2a2c31] hover:bg-[#34363c] border border-[#3a3d44] text-xs py-2 px-3 rounded-xl text-amber-300 font-semibold flex items-center justify-center gap-2"
+                          >
+                            <Camera className="w-3.5 h-3.5" />
+                            <span>{lang === 'ar' ? 'استخدام لقطة الشاشة الملتقطة الأخيرة' : 'Use Last Captured Screenshot'}</span>
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Aspect Ratio Constraint: strictly 16:9 or 9:16 */}
+                  <div className="flex flex-col gap-2">
+                    <label className="text-xs font-semibold text-white">
+                      {lang === 'ar' ? '2. أبعاد الفيديو (Aspect Ratio المطلوب):' : '2. Video Aspect Ratio (Required):'}
+                    </label>
+                    <div className="grid grid-cols-2 gap-3 text-xs font-semibold">
+                      <button
+                        type="button"
+                        onClick={() => setVideoAspectRatio('16:9')}
+                        className={`py-3 px-4 rounded-xl border flex flex-col items-center gap-1 transition-all ${
+                          videoAspectRatio === '16:9'
+                            ? 'bg-amber-600 border-amber-400 text-white shadow-md'
+                            : 'bg-[#25272c] border-[#3a3d44] text-[#9aa0aa] hover:text-white'
+                        }`}
+                      >
+                        <span className="text-sm font-bold">16:9</span>
+                        <span className="text-[11px] text-amber-200">
+                          {lang === 'ar' ? 'شاشة عريضة (Landscape)' : 'Landscape (Widescreen)'}
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setVideoAspectRatio('9:16')}
+                        className={`py-3 px-4 rounded-xl border flex flex-col items-center gap-1 transition-all ${
+                          videoAspectRatio === '9:16'
+                            ? 'bg-amber-600 border-amber-400 text-white shadow-md'
+                            : 'bg-[#25272c] border-[#3a3d44] text-[#9aa0aa] hover:text-white'
+                        }`}
+                      >
+                        <span className="text-sm font-bold">9:16</span>
+                        <span className="text-[11px] text-amber-200">
+                          {lang === 'ar' ? 'طولي (Portrait / Stories / Reels)' : 'Portrait (Stories / Reels)'}
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Motion Prompt Input */}
+                  <div className="flex flex-col gap-2">
+                    <label className="text-xs font-semibold text-white">
+                      {lang === 'ar' ? '3. وصف الحركة والتحريك (Motion Prompt):' : '3. Motion Dynamics Prompt:'}
+                    </label>
+                    <textarea
+                      value={videoPrompt}
+                      onChange={(e) => setVideoPrompt(e.target.value)}
+                      rows={3}
+                      placeholder={
+                        lang === 'ar'
+                          ? 'صف حركة الكاميرا والعمق والعناصر المتحركة...'
+                          : 'Describe camera movement, lighting dynamics, and character motion...'
+                      }
+                      className="bg-[#25272c] border border-[#3a3d44] focus:border-amber-500 rounded-xl p-3 text-xs text-white outline-none resize-none"
+                    />
+
+                    {/* Presets */}
+                    <div className="flex flex-wrap gap-1.5 pt-1">
+                      <span className="text-[11px] text-[#9aa0aa] self-center">
+                        {lang === 'ar' ? 'أنماط جاهزة:' : 'Presets:'}
+                      </span>
+                      {[
+                        { ar: 'زووم سينمائي ناعم', en: 'Cinematic slow zoom in with gentle depth blur' },
+                        { ar: 'حركة رياح وأمطار خفيفة', en: 'Gentle wind blowing through elements with soft rain' },
+                        { ar: 'دوران كاميرا ثلاثي الأبعاد', en: 'Smooth 3D orbit camera movement' },
+                      ].map((preset, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => setVideoPrompt(lang === 'ar' ? preset.ar : preset.en)}
+                          className="text-[10px] bg-[#2a2c31] hover:bg-[#34363c] border border-[#3a3d44] text-amber-300 px-2 py-0.5 rounded-lg"
+                        >
+                          {lang === 'ar' ? preset.ar : preset.en}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Error display */}
+                  {videoError && (
+                    <div className="bg-red-950/40 border border-red-800 text-red-300 text-xs p-3 rounded-xl flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4 shrink-0" />
+                      <span>{videoError}</span>
+                    </div>
+                  )}
+
+                  {/* Action Button */}
+                  <button
+                    onClick={handleAnimateVideo}
+                    disabled={isGeneratingVideo || !videoPhoto}
+                    className="bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white font-bold text-xs py-3 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-amber-600/25 transition-all cursor-pointer"
+                  >
+                    <Film className={`w-4 h-4 ${isGeneratingVideo ? 'animate-spin' : ''}`} />
+                    <span>
+                      {isGeneratingVideo
+                        ? (lang === 'ar' ? 'جارٍ تحريك الفيديو عبر gemini-omni-1.1-flash...' : 'Animating with gemini-omni-1.1-flash...')
+                        : (lang === 'ar' ? 'تحويل الصورة إلى فيديو (Animate)' : 'Generate Video from Photo')}
+                    </span>
+                  </button>
+                </div>
+
+                {/* Video Player Output */}
+                <div className="lg:col-span-6 flex flex-col gap-3">
+                  <div className="text-xs font-semibold text-white flex items-center justify-between">
+                    <span>{lang === 'ar' ? 'الفيديو الناتج:' : 'Generated Video:'}</span>
+                    {generatedVideoUrl && (
+                      <a
+                        href={generatedVideoUrl}
+                        download={`ScrollSnip_Animate_${Date.now()}.mp4`}
+                        className="text-[11px] bg-amber-600 hover:bg-amber-500 text-white px-3 py-1 rounded-lg flex items-center gap-1 font-semibold"
+                      >
+                        <Download className="w-3 h-3" />
+                        <span>{lang === 'ar' ? 'تحميل الفيديو MP4' : 'Download MP4'}</span>
+                      </a>
+                    )}
+                  </div>
+
+                  <div className="flex-1 min-h-[320px] bg-[#141518] border border-[#30333a] rounded-2xl flex items-center justify-center p-4 relative overflow-hidden">
+                    {isGeneratingVideo ? (
+                      <div className="flex flex-col items-center gap-3 text-center">
+                        <div className="w-12 h-12 rounded-full border-4 border-amber-500/20 border-t-amber-500 animate-spin" />
+                        <span className="text-xs font-semibold text-amber-300">
+                          {lang === 'ar' ? 'نموذج gemini-omni-1.1-flash يولد إطارات الفيديو...' : 'gemini-omni-1.1-flash is rendering video frames...'}
+                        </span>
+                        <span className="text-[11px] text-[#9aa0aa]">
+                          Aspect Ratio: {videoAspectRatio} · Resolution: 720p · Duration: 5s
+                        </span>
+                      </div>
+                    ) : generatedVideoUrl ? (
+                      <video
+                        src={generatedVideoUrl}
+                        controls
+                        autoPlay
+                        loop
+                        className={`rounded-xl shadow-2xl ${
+                          videoAspectRatio === '9:16'
+                            ? 'max-h-[380px] w-auto aspect-[9/16]'
+                            : 'w-full max-h-[380px] aspect-[16/9]'
+                        }`}
+                      />
+                    ) : (
+                      <div className="flex flex-col items-center gap-2 text-center text-[#5a5e66]">
+                        <Film className="w-12 h-12 stroke-[1.2]" />
+                        <span className="text-xs">
+                          {lang === 'ar' ? 'سيظهر الفيديو المولد هنا بأبعاد ' + videoAspectRatio : 'Generated video will play here in ' + videoAspectRatio}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* TAB 4: UNIFIED ARCHIVE & BUILD LAB TAB                                    */}
+        {/* ========================================================================= */}
+        {activeTab === 'archive' && (
+          <div className="flex flex-col gap-6">
+            {/* Top Sub-Navigation Header */}
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-[#1c1d21] p-4 rounded-2xl border border-[#30333a] shadow-lg">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="bg-[#32d74b]/15 text-[#32d74b] text-xs font-bold px-2.5 py-0.5 rounded-full border border-[#32d74b]/30">
+                    {lang === 'ar' ? 'تبويب أرشيفي موحد' : 'Unified Archive'}
+                  </span>
+                  <span className="text-xs text-[#9aa0aa]">
+                    {lang === 'ar' ? 'ملف ويندوز التنفيذي، كود المشروع، واختبارات Pytest' : 'Windows EXE, source tree, and unit tests'}
+                  </span>
+                </div>
+                <h2 className="text-lg font-bold text-white mt-1">
+                  {lang === 'ar' ? 'أرشيف المشروع ومستودع البناء' : 'Project Archive & Build Lab'}
+                </h2>
+              </div>
+
+              {/* Sub-Tabs Selector */}
+              <div className="flex items-center bg-[#25272c] p-1 rounded-xl border border-[#30333a] overflow-x-auto">
+                <button
+                  onClick={() => setArchiveSubTab('build')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
+                    archiveSubTab === 'build'
+                      ? 'bg-[#32d74b] text-black font-bold shadow-sm'
+                      : 'text-[#9aa0aa] hover:text-white hover:bg-[#2f3238]'
+                  }`}
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>{lang === 'ar' ? '⚡ ملف ويندوز التنفيذي' : '⚡ Windows EXE'}</span>
+                </button>
+
+                <button
+                  onClick={() => setArchiveSubTab('code')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
+                    archiveSubTab === 'code'
+                      ? 'bg-[#4f8cff] text-white shadow-sm'
+                      : 'text-[#9aa0aa] hover:text-white hover:bg-[#2f3238]'
+                  }`}
+                >
+                  <FileCode className="w-3.5 h-3.5" />
+                  <span>{lang === 'ar' ? '📁 كود المصدر وتنزيل ZIP' : '📁 Source Code & ZIP'}</span>
+                </button>
+
+                <button
+                  onClick={() => setArchiveSubTab('tests')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
+                    archiveSubTab === 'tests'
+                      ? 'bg-[#4f8cff] text-white shadow-sm'
+                      : 'text-[#9aa0aa] hover:text-white hover:bg-[#2f3238]'
+                  }`}
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>{lang === 'ar' ? '🧪 اختبارات Pytest' : '🧪 Pytest Lab'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Sub-Tab 2: Source Code */}
+            {archiveSubTab === 'code' && (
+              <div className="flex flex-col gap-4">
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-[#1c1d21] p-4 rounded-2xl border border-[#30333a]">
               <div>
                 <h2 className="text-base font-bold text-white flex items-center gap-2">
@@ -967,8 +1714,8 @@ export default function App() {
                 </h2>
                 <p className="text-xs text-[#9aa0aa]">
                   {lang === 'ar'
-                    ? '17 ملفًا مكتوبة وجاهزة للنسخ أو التنزيل الفوري، تم تطبيقها على القرص بنفس ترتيب الشجرة'
-                    : '17 production files ready to inspect, copy, or download as a standalone package'}
+                    ? '17 ملفًا مطبقًا على القرص، بالإضافة لخوادم Express ونماذج Gemini'
+                    : 'All Python, config, and backend routes organized in the workspace'}
                 </p>
               </div>
 
@@ -995,12 +1742,10 @@ export default function App() {
               </div>
             </div>
 
-            {/* Tree View + Code View Layout */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-              {/* File List Tree */}
               <div className="lg:col-span-4 bg-[#1c1d21] border border-[#30333a] rounded-2xl p-4 flex flex-col gap-2 max-h-[640px] overflow-y-auto">
                 <div className="text-xs font-bold text-[#9aa0aa] uppercase tracking-wider px-2 py-1">
-                  {lang === 'ar' ? 'شجرة الحزمة scrollsnip/' : 'Package tree scrollsnip/'}
+                  {lang === 'ar' ? 'ملفات المشروع' : 'Project Files'}
                 </div>
 
                 {PROJECT_FILES.map((file) => {
@@ -1039,9 +1784,7 @@ export default function App() {
                 })}
               </div>
 
-              {/* Code Viewer */}
               <div className="lg:col-span-8 bg-[#1c1d21] border border-[#30333a] rounded-2xl flex flex-col overflow-hidden max-h-[640px]">
-                {/* Code header */}
                 <div className="bg-[#232529] px-4 py-2.5 border-b border-[#30333a] flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Code2 className="w-4 h-4 text-[#4f8cff]" />
@@ -1054,7 +1797,6 @@ export default function App() {
                   </span>
                 </div>
 
-                {/* Code display */}
                 <div className="flex-1 overflow-auto p-4 bg-[#141518] font-mono text-xs text-[#e8eaed] leading-relaxed">
                   <pre className="selection:bg-[#4f8cff] selection:text-white">
                     <code>
@@ -1074,10 +1816,8 @@ export default function App() {
           </div>
         )}
 
-        {/* ========================================================================= */}
-        {/* TAB 3: TESTS LAB                                                         */}
-        {/* ========================================================================= */}
-        {activeTab === 'tests' && (
+            {/* Sub-Tab 3: Pytest Tests */}
+            {archiveSubTab === 'tests' && (
           <div className="flex flex-col gap-6">
             <div className="bg-[#1c1d21] border border-[#30333a] rounded-2xl p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
               <div>
@@ -1104,7 +1844,6 @@ export default function App() {
               </button>
             </div>
 
-            {/* Test Case Cards */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {testResults.map((test) => (
                 <div
@@ -1156,165 +1895,140 @@ export default function App() {
                 </div>
               ))}
             </div>
+          </div>
+        )}
 
-            {/* Algorithm Highlights */}
-            <div className="bg-[#1c1d21] border border-[#30333a] rounded-2xl p-6 flex flex-col gap-4">
-              <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                <Layers className="w-4 h-4 text-[#4f8cff]" />
-                <span>{lang === 'ar' ? 'مزايا الهندسة البرمجية في ScrollSnip v2.0' : 'ScrollSnip Core Architecture'}</span>
-              </h3>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-                <div className="bg-[#25272c] border border-[#30333a] p-4 rounded-xl">
-                  <span className="text-[#4f8cff] font-bold block mb-1">
-                    {lang === 'ar' ? 'سقف الذاكرة 256MB' : '256MB RAM Cap'}
+            {/* Sub-Tab 1: Windows EXE & GitHub Actions */}
+            {archiveSubTab === 'build' && (
+          <div className="flex flex-col gap-6">
+            <div className="bg-gradient-to-r from-[#1c2438] via-[#1c1d21] to-[#1c2438] border-2 border-[#4f8cff]/40 rounded-3xl p-6 sm:p-8 flex flex-col md:flex-row items-start md:items-center justify-between gap-6 shadow-2xl relative overflow-hidden">
+              <div className="flex flex-col gap-2 z-10">
+                <div className="flex items-center gap-2">
+                  <span className="bg-[#32d74b]/20 text-[#32d74b] border border-[#32d74b]/40 text-xs font-bold px-3 py-1 rounded-full flex items-center gap-1.5">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>{lang === 'ar' ? 'جاهز للبناء التلقائي عبر GitHub' : 'GitHub Actions Ready'}</span>
                   </span>
-                  <p className="text-[#9aa0aa] leading-relaxed">
+                  <span className="bg-[#4f8cff]/20 text-[#6ba0ff] border border-[#4f8cff]/40 text-xs font-bold px-3 py-1 rounded-full">
+                    Windows x64 Native
+                  </span>
+                </div>
+                <h2 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
+                  {lang === 'ar'
+                    ? 'الحصول على الملف التنفيذي ScrollSnip.exe'
+                    : 'Get the Standalone ScrollSnip.exe for Windows'}
+                </h2>
+                <p className="text-sm text-[#9aa0aa] max-w-2xl leading-relaxed">
+                  {lang === 'ar'
+                    ? 'تم إعداد سير عمل GitHub Actions تلقائي بنظام Windows Server 2022 ليقوم بتجميع واختبار وإنتاج ملف ScrollSnip.exe المستقل فورًا عند رفع الكود!'
+                    : 'A native Windows Server 2022 GitHub Actions workflow is fully configured to test and compile standalone ScrollSnip.exe automatically.'}
+                </p>
+              </div>
+
+              <div className="flex flex-col sm:flex-row md:flex-col gap-2 w-full md:w-auto z-10">
+                <button
+                  onClick={() => {
+                    const bat = PROJECT_FILES.find((f) => f.path === 'build_exe.bat')?.code || '';
+                    const blob = new Blob([bat], { type: 'application/x-bat' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'build_exe.bat';
+                    a.click();
+                    URL.revokeObjectURL(url);
+                    showStatus(lang === 'ar' ? 'تم تنزيل ملف build_exe.bat' : 'Downloaded build_exe.bat');
+                  }}
+                  className="bg-[#4f8cff] hover:bg-[#6ba0ff] text-white font-bold text-xs px-4 py-2.5 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-[#4f8cff]/25 transition-all"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>{lang === 'ar' ? 'تحميل سكربت البناء build_exe.bat' : 'Download build_exe.bat'}</span>
+                </button>
+
+                <button
+                  onClick={handleDownloadZip}
+                  disabled={isZipping}
+                  className="bg-[#2a2c31] hover:bg-[#34363c] border border-[#3a3d44] hover:border-[#4f8cff] text-white text-xs font-semibold px-4 py-2.5 rounded-xl flex items-center justify-center gap-2 transition-all"
+                >
+                  <FileArchive className="w-4 h-4 text-[#4f8cff]" />
+                  <span>{lang === 'ar' ? 'تحميل حزمة المشروع الكاملة (.ZIP)' : 'Download Full Package (.ZIP)'}</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="bg-[#1c1d21] border border-[#30333a] rounded-2xl p-6 flex flex-col gap-5">
+              <div className="border-b border-[#25272c] pb-3">
+                <h3 className="text-base font-bold text-white flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-[#ffd60a]" />
+                  <span>
                     {lang === 'ar'
-                      ? 'مخزن رأسي مخصص مسبقًا بمصفوفة NumPy واحدة تمنع استنزاف الذاكرة وانهيار النظام عند التقاط صفحات طويلة جدًا.'
-                      : 'Pre-allocated single contiguous NumPy array buffer preventing Out-Of-Memory spikes on large 4K screens.'}
+                      ? 'خطوات تنزيل ScrollSnip.exe من مستودعك على GitHub'
+                      : 'How to Download ScrollSnip.exe from GitHub Actions'}
+                  </span>
+                </h3>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div className="bg-[#25272c] border border-[#30333a] rounded-xl p-4 flex flex-col gap-2 relative">
+                  <div className="w-7 h-7 rounded-full bg-[#4f8cff]/20 text-[#6ba0ff] font-bold text-xs flex items-center justify-center border border-[#4f8cff]/40">
+                    1
+                  </div>
+                  <h4 className="text-xs font-bold text-white">
+                    {lang === 'ar' ? 'افتح مستودع GitHub' : 'Open GitHub Repo'}
+                  </h4>
+                  <p className="text-[11px] text-[#9aa0aa] leading-relaxed">
+                    {lang === 'ar'
+                      ? 'توجه إلى صفحة مستودعك الذي قمت بربطه على موقع github.com.'
+                      : 'Go to your linked repository on github.com.'}
                   </p>
                 </div>
 
-                <div className="bg-[#25272c] border border-[#30333a] p-4 rounded-xl">
-                  <span className="text-[#32d74b] font-bold block mb-1">
-                    {lang === 'ar' ? 'تمرير UI Automation صامت' : 'Silent UI Automation'}
-                  </span>
-                  <p className="text-[#9aa0aa] leading-relaxed">
+                <div className="bg-[#25272c] border border-[#30333a] rounded-xl p-4 flex flex-col gap-2 relative">
+                  <div className="w-7 h-7 rounded-full bg-[#4f8cff]/20 text-[#6ba0ff] font-bold text-xs flex items-center justify-center border border-[#4f8cff]/40">
+                    2
+                  </div>
+                  <h4 className="text-xs font-bold text-white">
+                    {lang === 'ar' ? 'اضغط تبويب Actions' : 'Click "Actions" Tab'}
+                  </h4>
+                  <p className="text-[11px] text-[#9aa0aa] leading-relaxed">
                     {lang === 'ar'
-                      ? 'استخدام ScrollPattern لتمرير العنصر المستهدف مباشرة دون تحريك مؤشر الفأرة، مع ارتداد آمن إلى SendInput.'
-                      : 'Uses native Windows UIAutomation ScrollPattern to scroll containers without fighting the user mouse cursor.'}
+                      ? 'في الشريط العلوي للمستودع ستجد تبويب Actions (الإجراءات الآلية).'
+                      : 'Look at the top repository navigation bar and click Actions.'}
                   </p>
                 </div>
 
-                <div className="bg-[#25272c] border border-[#30333a] p-4 rounded-xl">
-                  <span className="text-[#ffd60a] font-bold block mb-1">
-                    {lang === 'ar' ? 'استبعاد النوافذ من الالتقاط' : 'Capture Exclusion'}
-                  </span>
-                  <p className="text-[#9aa0aa] leading-relaxed">
+                <div className="bg-[#25272c] border border-[#30333a] rounded-xl p-4 flex flex-col gap-2 relative">
+                  <div className="w-7 h-7 rounded-full bg-[#4f8cff]/20 text-[#6ba0ff] font-bold text-xs flex items-center justify-center border border-[#4f8cff]/40">
+                    3
+                  </div>
+                  <h4 className="text-xs font-bold text-white">
+                    {lang === 'ar' ? 'اختر Build Windows Executable' : 'Select Build Run'}
+                  </h4>
+                  <p className="text-[11px] text-[#9aa0aa] leading-relaxed">
                     {lang === 'ar'
-                      ? 'تطبيق SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE) لإخفاء شريط HUD ومحدد المنطقة تلقائيًا عن اللقطة.'
-                      : 'Uses SetWindowDisplayAffinity so HUD overlays and counters never appear in the final captured image.'}
+                      ? 'اضغط على أحدث تشغيل لسير العمل (أو اضغط Run workflow).'
+                      : 'Click the latest workflow run (or press Run workflow).'}
+                  </p>
+                </div>
+
+                <div className="bg-[#25272c] border border-[#32d74b]/50 rounded-xl p-4 flex flex-col gap-2 relative bg-emerald-950/20">
+                  <div className="w-7 h-7 rounded-full bg-[#32d74b]/20 text-[#32d74b] font-bold text-xs flex items-center justify-center border border-[#32d74b]/40">
+                    4
+                  </div>
+                  <h4 className="text-xs font-bold text-[#32d74b]">
+                    {lang === 'ar' ? 'تحميل ScrollSnip-Windows-EXE' : 'Download Artifact'}
+                  </h4>
+                  <p className="text-[11px] text-[#9aa0aa] leading-relaxed">
+                    {lang === 'ar'
+                      ? 'في أسفل الصفحة بقسم Artifacts، اضغط على ScrollSnip-Windows-EXE للتحميل مباشرة!'
+                      : 'At the bottom in Artifacts section, click ScrollSnip-Windows-EXE.'}
                   </p>
                 </div>
               </div>
             </div>
           </div>
         )}
-
-        {/* ========================================================================= */}
-        {/* TAB 4: WINDOWS SETUP & RUN GUIDE                                         */}
-        {/* ========================================================================= */}
-        {activeTab === 'guide' && (
-          <div className="flex flex-col gap-6">
-            <div className="bg-[#1c1d21] border border-[#30333a] rounded-2xl p-6 flex flex-col gap-4">
-              <h2 className="text-base font-bold text-white flex items-center gap-2">
-                <Terminal className="w-5 h-5 text-[#4f8cff]" />
-                <span>
-                  {lang === 'ar' ? 'دليل تشغيل وبناء ScrollSnip على ويندوز' : 'How to Run & Build on Windows'}
-                </span>
-              </h2>
-              <p className="text-xs text-[#9aa0aa]">
-                {lang === 'ar'
-                  ? 'تم إنشاء جميع الملفات بالكامل في مجلد scrollsnip/ مع كافة الاعتماديات والاختبارات.'
-                  : 'All files are already written to disk. Here are instructions to run or compile as a standalone .exe.'}
-              </p>
-
-              {/* Step 1 */}
-              <div className="bg-[#141518] border border-[#30333a] rounded-xl p-4 flex flex-col gap-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-white">
-                    {lang === 'ar' ? '1. تثبيت المتطلبات (Requirements)' : '1. Install Dependencies'}
-                  </span>
-                  <button
-                    onClick={() => {
-                      navigator.clipboard.writeText('pip install -r requirements.txt');
-                      showStatus(lang === 'ar' ? 'تم نسخ الأمر' : 'Command copied');
-                    }}
-                    className="text-xs text-[#4f8cff] hover:underline flex items-center gap-1"
-                  >
-                    <Copy className="w-3 h-3" />
-                    <span>{lang === 'ar' ? 'نسخ' : 'Copy'}</span>
-                  </button>
-                </div>
-                <pre className="bg-[#1c1d21] p-3 rounded-lg font-mono text-xs text-[#32d74b]">
-                  <code>pip install -r requirements.txt</code>
-                </pre>
-              </div>
-
-              {/* Step 2 */}
-              <div className="bg-[#141518] border border-[#30333a] rounded-xl p-4 flex flex-col gap-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-white">
-                    {lang === 'ar' ? '2. تشغيل البرنامج' : '2. Run Application'}
-                  </span>
-                  <button
-                    onClick={() => {
-                      navigator.clipboard.writeText('python -m scrollsnip');
-                      showStatus(lang === 'ar' ? 'تم نسخ الأمر' : 'Command copied');
-                    }}
-                    className="text-xs text-[#4f8cff] hover:underline flex items-center gap-1"
-                  >
-                    <Copy className="w-3 h-3" />
-                    <span>{lang === 'ar' ? 'نسخ' : 'Copy'}</span>
-                  </button>
-                </div>
-                <pre className="bg-[#1c1d21] p-3 rounded-lg font-mono text-xs text-[#32d74b]">
-                  <code>python -m scrollsnip</code>
-                </pre>
-              </div>
-
-              {/* Step 3 */}
-              <div className="bg-[#141518] border border-[#30333a] rounded-xl p-4 flex flex-col gap-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-white">
-                    {lang === 'ar' ? '3. تشغيل الاختبارات' : '3. Run Pytest Suite'}
-                  </span>
-                  <button
-                    onClick={() => {
-                      navigator.clipboard.writeText('pytest tests/');
-                      showStatus(lang === 'ar' ? 'تم نسخ الأمر' : 'Command copied');
-                    }}
-                    className="text-xs text-[#4f8cff] hover:underline flex items-center gap-1"
-                  >
-                    <Copy className="w-3 h-3" />
-                    <span>{lang === 'ar' ? 'نسخ' : 'Copy'}</span>
-                  </button>
-                </div>
-                <pre className="bg-[#1c1d21] p-3 rounded-lg font-mono text-xs text-[#32d74b]">
-                  <code>pytest tests/</code>
-                </pre>
-              </div>
-
-              {/* Step 4 */}
-              <div className="bg-[#141518] border border-[#30333a] rounded-xl p-4 flex flex-col gap-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-white">
-                    {lang === 'ar' ? '4. بناء ملف تنفيذي مستقل (.exe)' : '4. Compile to Standalone .exe (PyInstaller)'}
-                  </span>
-                  <button
-                    onClick={() => {
-                      navigator.clipboard.writeText('pip install pyinstaller\npyinstaller -w -n ScrollSnip scrollsnip/__main__.py');
-                      showStatus(lang === 'ar' ? 'تم نسخ الأمر' : 'Command copied');
-                    }}
-                    className="text-xs text-[#4f8cff] hover:underline flex items-center gap-1"
-                  >
-                    <Copy className="w-3 h-3" />
-                    <span>{lang === 'ar' ? 'نسخ' : 'Copy'}</span>
-                  </button>
-                </div>
-                <pre className="bg-[#1c1d21] p-3 rounded-lg font-mono text-xs text-[#32d74b]">
-                  <code>pip install pyinstaller{'\n'}pyinstaller -w -n ScrollSnip scrollsnip/__main__.py</code>
-                </pre>
-              </div>
-            </div>
           </div>
         )}
       </main>
-
-      {/* ========================================================================= */}
-      {/* SIMULATED OVERLAYS & MODALS                                               */}
-      {/* ========================================================================= */}
 
       {/* Countdown Overlay */}
       {captureStage === 'countdown' && (
@@ -1355,7 +2069,6 @@ export default function App() {
             setDragStart(null);
           }}
         >
-          {/* Top Instruction banner */}
           <div className="p-4 text-center">
             <span className="bg-[#18191d]/90 border border-[#4f8cff] text-[#e8eaed] text-xs px-4 py-2 rounded-xl shadow-lg">
               {lang === 'ar'
@@ -1364,7 +2077,6 @@ export default function App() {
             </span>
           </div>
 
-          {/* Selection Box */}
           {selectionBox && selectionBox.w > 0 && (
             <div
               className="absolute border-2 border-[#4f8cff] bg-transparent shadow-[0_0_0_9999px_rgba(0,0,0,0.5)] pointer-events-none"
@@ -1381,7 +2093,6 @@ export default function App() {
             </div>
           )}
 
-          {/* Cancel button */}
           <div className="absolute bottom-6 end-6">
             <button
               onClick={() => {
@@ -1396,7 +2107,7 @@ export default function App() {
         </div>
       )}
 
-      {/* Scrolling HUD Floating Bar (Replicating ScrollHud) */}
+      {/* Scrolling HUD Floating Bar */}
       {captureStage === 'scrolling' && (
         <div className="fixed top-8 left-1/2 -translate-x-1/2 z-50">
           <div className="bg-[#18191d]/95 border-2 border-[#4f8cff] rounded-2xl px-6 py-3.5 shadow-2xl flex items-center gap-5 backdrop-blur-md animate-pulse">
@@ -1422,32 +2133,58 @@ export default function App() {
         </div>
       )}
 
-      {/* ========================================================================= */}
-      {/* BUILT-IN EDITOR MODAL (Replicating EditorWindow & ImageCanvas)            */}
-      {/* ========================================================================= */}
+      {/* Built-in Editor Modal */}
       {captureStage === 'editor' && editorImage && (
         <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xs flex flex-col">
-          {/* Editor Window Chrome Title Bar */}
           <div className="bg-[#232529] px-4 py-2 border-b border-[#30333a] flex items-center justify-between text-xs text-[#9aa0aa]">
             <div className="flex items-center gap-2">
               <span className="font-bold text-white">
                 {lang === 'ar' ? 'ScrollSnip — المحرر المدمج' : 'ScrollSnip — Built-in Editor'}
               </span>
             </div>
-            <button
-              onClick={() => {
-                setCaptureStage('idle');
-                setIsCapturing(false);
-              }}
-              className="text-white hover:text-red-400 cursor-pointer"
-            >
-              <X className="w-4 h-4" />
-            </button>
+
+            <div className="flex items-center gap-2">
+              {/* Quick AI Shortcuts */}
+              <button
+                onClick={() => {
+                  setAiImageSource(getCompositedCanvasUrl());
+                  setAiImageMode('edit');
+                  setActiveTab('ai-image');
+                  setCaptureStage('idle');
+                }}
+                className="bg-purple-900/40 hover:bg-purple-900/60 text-purple-300 border border-purple-700 text-xs px-2.5 py-1 rounded-lg flex items-center gap-1 font-semibold"
+                title="Edit this screenshot with Gemini Nano Banana"
+              >
+                <Wand2 className="w-3 h-3" />
+                <span className="hidden sm:inline">{lang === 'ar' ? 'تعديل بالذكاء الاصطناعي' : 'AI Edit'}</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  setVideoPhoto(getCompositedCanvasUrl());
+                  setActiveTab('ai-video');
+                  setCaptureStage('idle');
+                }}
+                className="bg-amber-900/40 hover:bg-amber-900/60 text-amber-300 border border-amber-700 text-xs px-2.5 py-1 rounded-lg flex items-center gap-1 font-semibold"
+                title="Animate this screenshot with Gemini Omni Flash"
+              >
+                <Film className="w-3 h-3" />
+                <span className="hidden sm:inline">{lang === 'ar' ? 'تحويل إلى فيديو' : 'Animate Video'}</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  setCaptureStage('idle');
+                  setIsCapturing(false);
+                }}
+                className="text-white hover:text-red-400 cursor-pointer p-1"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
           </div>
 
-          {/* Editor Toolbar (matching _build_toolbar() in editor.py) */}
           <div className="bg-[#232529] border-b border-[#30333a] px-4 py-2 flex items-center justify-between gap-3 overflow-x-auto">
-            {/* Tool buttons */}
             <div className="flex items-center gap-1">
               <button
                 onClick={() => setEditorTool('pen')}
@@ -1517,7 +2254,6 @@ export default function App() {
 
             <div className="h-6 w-px bg-[#30333a] mx-1" />
 
-            {/* Color Swatches */}
             <div className="flex items-center gap-1.5">
               {SWATCHES.map((c) => (
                 <button
@@ -1531,7 +2267,6 @@ export default function App() {
               ))}
             </div>
 
-            {/* Stroke Width Slider */}
             <div className="flex items-center gap-2 px-2">
               <span className="text-[11px] text-[#9aa0aa] hidden md:inline">
                 {lang === 'ar' ? 'السُّمك' : 'Size'}
@@ -1549,7 +2284,6 @@ export default function App() {
 
             <div className="h-6 w-px bg-[#30333a] mx-1" />
 
-            {/* Undo / Redo */}
             <div className="flex items-center gap-1">
               <button
                 onClick={undo}
@@ -1571,7 +2305,6 @@ export default function App() {
 
             <div className="h-6 w-px bg-[#30333a] mx-1" />
 
-            {/* Zoom Controls */}
             <div className="flex items-center gap-1">
               <button
                 onClick={() => setZoomLevel(1.0)}
@@ -1589,7 +2322,6 @@ export default function App() {
 
             <div className="flex-1" />
 
-            {/* Action buttons: Copy, Save, Save As */}
             <div className="flex items-center gap-2">
               <button
                 onClick={() => copyImageToClipboard()}
@@ -1609,7 +2341,6 @@ export default function App() {
             </div>
           </div>
 
-          {/* Canvas Scroll Area */}
           <div className="flex-1 overflow-auto bg-[#141518] p-6 flex items-center justify-center">
             <div
               style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'center center' }}

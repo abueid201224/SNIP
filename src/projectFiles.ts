@@ -2007,12 +2007,173 @@ pytest>=7.4.0
 
 أداة لقطات الشاشة المتطورة لنظام ويندوز مع دعم التمرير التلقائي، التكبير عالي الدقة (Per-Monitor DPI v2)، المحرر المدمج، ودعم كامل للغتين العربية والإنجليزية.
 
-## المميزات الأساسية
-1. لقطة بالتمرير التلقائي (Scrolling Capture) عبر خوارزمية cv2.matchTemplate
-2. مخزن ذاكرة آمن بسقف 256MB يمنع استنزاف الرام
-3. تكامل UI Automation و SendInput بدون تشتيت المؤشر
-4. محرر متكامل: أقلام، تمييز، مستطيلات، أسهم، نصوص، تراجع وإعادة، ونسخ فوري
-5. دعم كامل للعربية (RTL) وقواعد الجموع الصحيحة
+## ⚡ كيفية الحصول على الملف التنفيذي (.exe) عبر جيت هاب (GitHub Actions)
+1. انتقل إلى مستودع المشروع على GitHub.
+2. اضغط على تبويب Actions.
+3. ستجد سير عمل Build Windows Executable (ScrollSnip.exe).
+4. في أحدث تشغيل، حمّل ملف ScrollSnip-Windows-EXE من قسم Artifacts.
+`,
+  },
+  {
+    path: '.github/workflows/build-windows.yml',
+    name: 'build-windows.yml',
+    category: 'config',
+    descriptionAr: 'سير عمل GitHub Actions لبناء الملف التنفيذي ScrollSnip.exe تلقائيًا على سيرفرات ويندوز',
+    descriptionEn: 'GitHub Actions workflow to automatically compile native ScrollSnip.exe on Windows runners',
+    code: `name: Build Windows Executable (ScrollSnip.exe)
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    name: Build Native Windows EXE
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.10 x64
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Run Test Suite
+        run: |
+          pytest tests/ -v
+
+      - name: Compile Windows EXE with PyInstaller
+        run: |
+          pyinstaller --clean ScrollSnip.spec
+
+      - name: Upload Windows Executable Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ScrollSnip-Windows-EXE
+          path: |
+            dist/ScrollSnip.exe
+          retention-days: 90
+`,
+  },
+  {
+    path: 'ScrollSnip.spec',
+    name: 'ScrollSnip.spec',
+    category: 'config',
+    descriptionAr: 'ملف مواصفات PyInstaller لإنتاج ملف تنفيذي وحيد بدون نافذة كونسول سوداء',
+    descriptionEn: 'PyInstaller spec configuration for standalone windowed binary without black console',
+    code: `# -*- mode: python ; coding: utf-8 -*-
+from PyInstaller.utils.hooks import collect_submodules
+
+hidden_imports = [
+    'mss',
+    'cv2',
+    'numpy',
+    'PySide6.QtCore',
+    'PySide6.QtGui',
+    'PySide6.QtWidgets',
+    'comtypes',
+    'comtypes.client',
+] + collect_submodules('scrollsnip')
+
+datas = [
+    ('scrollsnip', 'scrollsnip'),
+    ('assets', 'assets'),
+]
+
+a = Analysis(
+    ['scrollsnip/__main__.py'],
+    pathex=['.'],
+    binaries=[],
+    datas=datas,
+    hiddenimports=hidden_imports,
+    excludes=['tkinter', 'matplotlib', 'scipy'],
+    console=False,
+    icon='assets/icon.ico',
+)
+pyz = PYZ(a.pure, a.zipped_data)
+exe = EXE(
+    pyz,
+    a.scripts,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    name='ScrollSnip',
+    console=False,
+    icon='assets/icon.ico',
+)
+`,
+  },
+  {
+    path: 'build_exe.bat',
+    name: 'build_exe.bat',
+    category: 'config',
+    descriptionAr: 'ملف دفعة (Batch) لبناء الملف التنفيذي محليًا بنقرة مزدوجة واحدة على ويندوز',
+    descriptionEn: 'One-click Windows batch script to build ScrollSnip.exe locally',
+    code: `@echo off
+chcp 65001 >nul
+title بناء ScrollSnip التنفيذي لنظام ويندوز
+
+where python >nul 2>nul
+if %errorlevel% neq 0 (
+    echo [خطأ] بايثون غير مثبت أو غير مضاف إلى متغيرات البيئة PATH!
+    pause
+    exit /b 1
+)
+
+if not exist "venv\\Scripts\\activate.bat" (
+    python -m venv venv
+)
+call venv\\Scripts\\activate.bat
+
+python -m pip install --upgrade pip
+pip install -r requirements.txt pyinstaller
+pytest tests/
+pyinstaller --clean ScrollSnip.spec
+
+if exist "dist\\ScrollSnip.exe" (
+    echo تم إنشاء dist\\ScrollSnip.exe بنجاح!
+    explorer.exe dist
+)
+pause
+`,
+  },
+  {
+    path: 'build_exe.ps1',
+    name: 'build_exe.ps1',
+    category: 'config',
+    descriptionAr: 'سكربت PowerShell ملون لتثبيت المتطلبات وتجميع ScrollSnip.exe محليًا',
+    descriptionEn: 'PowerShell script with colorized log output to compile ScrollSnip.exe locally',
+    code: `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+Write-Host "ScrollSnip v2.0.0 - Windows EXE Builder" -ForegroundColor Cyan
+
+if (-not (Test-Path "venv/Scripts/Activate.ps1")) {
+    python -m venv venv
+}
+& .\\venv\\Scripts\\Activate.ps1
+python -m pip install --upgrade pip
+pip install -r requirements.txt pyinstaller
+pytest tests/ -v
+pyinstaller --clean ScrollSnip.spec
+if (Test-Path "dist/ScrollSnip.exe") {
+    Write-Host "SUCCESS: dist/ScrollSnip.exe created!" -ForegroundColor Green
+    Invoke-Item "dist"
+}
 `,
   },
 ];
