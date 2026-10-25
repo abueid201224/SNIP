@@ -1,11 +1,41 @@
-<div align="center">
+# ScrollSnip v2.0.0
 
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+أداة لقطات الشاشة المتطورة لنظام ويندوز مع دعم التمرير التلقائي، التكبير عالي الدقة (Per-Monitor DPI v2)، المحرر المدمج، ودعم كامل للغتين العربية والإنجليزية.
 
-  <h1>Built with AI Studio</h2>
+## المميزات الأساسية
 
-  <p>The fastest path from prompt to production with Gemini.</p>
+1. **لقطة بالتمرير (Scrolling Capture)**: خوارزمية كشف الإزاحة التلقائية عبر `cv2.matchTemplate` مع مخزن ذاكرة ذكي محمي بسقف أقصى (`MAX_IMAGE_BYTES = 256MB`) يمنع استنزاف الرام.
+2. **لقطة منطقة (Region) وشاشة كاملة (Full Screen)**.
+3. **دعم UI Automation و SendInput**: تمرير سلس دون تحريك الفأرة أو معاركة المستخدم.
+4. **دقة الشاشات المتعددة (DPI-Aware)**: مطابقة الشاشات المنطقية بالبكسل الفعلي عبر `mss` دون تشويش.
+5. **محرر مدمج متكامل**: قلم، قلم تمييز شفاف، مستطيلات، أسهم متجهة، نصوص، تراجع وإعادة، تكبير وتصغير، ونسخ فوري للحافظة.
+6. **دعم كامل للغة العربية والإنجليزية**: واجهة RTL/LTR مع قواعد الجموع العربية الصحيحة (مفرد، مثنى، جمع قلة، جمع كثرة).
+7. **قفل النسخة الواحدة وشريط المهام (System Tray)** مع اختصارات لوحة المفاتيح العالمية:
+   - `Ctrl + Shift + S` : لقطة منطقة
+   - `Ctrl + Shift + W` : لقطة بالتمرير
+   - `Ctrl + Shift + F` : لقطة شاشة كاملة
 
-  <a href="https://aistudio.google.com/apps">Start building</a>
+## المتطلبات والتثبيت
 
-</div>
+```bash
+# 1. إنشاء بيئة عمل افتراضية (اختياري لكن مفضل)
+python -m venv venv
+venv\Scripts\activate
+
+# 2. تثبيت الحزم المطلوبة
+pip install -r requirements.txt
+
+# 3. تشغيل البرنامج
+python -m scrollsnip
+```
+
+## تشغيل الاختبارات
+```bash
+pytest tests/
+```
+
+## بناء ملف تنفيذي (.exe)
+```bash
+pip install pyinstaller
+pyinstaller -w -n ScrollSnip scrollsnip/__main__.py
+```

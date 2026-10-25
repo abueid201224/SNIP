@@ -1,0 +1,2018 @@
+export interface ProjectFile {
+  path: string;
+  name: string;
+  category: 'core' | 'gui' | 'windows' | 'tests' | 'config';
+  descriptionAr: string;
+  descriptionEn: string;
+  code: string;
+}
+
+export const PROJECT_FILES: ProjectFile[] = [
+  {
+    path: 'scrollsnip/__init__.py',
+    name: '__init__.py',
+    category: 'core',
+    descriptionAr: 'تعريف الحزمة وإصدار البرنامج v2.0.0',
+    descriptionEn: 'Package initialization and version string v2.0.0',
+    code: `__version__ = "2.0.0"\n`,
+  },
+  {
+    path: 'scrollsnip/constants.py',
+    name: 'constants.py',
+    category: 'core',
+    descriptionAr: 'الثوابت، المسارات، سقف الذاكرة 256MB، والإعدادات الافتراضية',
+    descriptionEn: 'Constants, paths, 256MB memory cap, and default settings',
+    code: `from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+IS_WIN = sys.platform == "win32"
+APP_NAME = "ScrollSnip"
+ORG_NAME = "ScrollSnip"
+
+APP_DIR = Path(os.environ.get("LOCALAPPDATA") or Path.home()) / APP_NAME
+APP_DIR.mkdir(parents=True, exist_ok=True)
+LOG_PATH = APP_DIR / "scrollsnip.log"
+LOCK_PATH = str(APP_DIR / "instance.lock")
+
+# سقف الذاكرة بدل سقف البكسل: 24000px على شاشة 4K تعني ~350MB
+MAX_IMAGE_BYTES = 256 * 1024 * 1024
+
+FRAME_INTERVAL_MS = 120
+MIN_SCROLL_PX = 3
+MATCH_THRESHOLD = 0.90
+
+DEFAULT_HOTKEYS = {
+    "region": "Ctrl+Shift+S",
+    "scroll": "Ctrl+Shift+W",
+    "full": "Ctrl+Shift+F",
+}
+
+DEFAULT_SETTINGS = {
+    "language": "ar",
+    "delay": 0,
+    "scroll_mode": "auto",
+    "copy_auto": True,
+    "save_auto": False,
+    "save_dir": str(Path.home() / "Pictures" / APP_NAME),
+}
+`,
+  },
+  {
+    path: 'scrollsnip/winapi.py',
+    name: 'winapi.py',
+    category: 'windows',
+    descriptionAr: 'غلّاف واجهات ويندوز: SendInput، الاختصارات، واستبعاد النوافذ من الالتقاط',
+    descriptionEn: 'Windows API wrapper: SendInput, Hotkeys, and capture exclusion',
+    code: `"""غلّاف رقيق لواجهات ويندوز. كل الدوال آمنة الاستدعاء على غير ويندوز."""
+from __future__ import annotations
+
+import ctypes
+import logging
+from ctypes import wintypes
+
+from .constants import IS_WIN
+
+log = logging.getLogger(__name__)
+
+WM_HOTKEY = 0x0312
+MOUSEEVENTF_WHEEL = 0x0800
+WDA_EXCLUDEFROMCAPTURE = 0x00000011
+
+MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN, MOD_NOREPEAT = 0x1, 0x2, 0x4, 0x8, 0x4000
+VK_ESCAPE = 0x1B
+INPUT_MOUSE = 0
+
+
+class MOUSEINPUT(ctypes.Structure):
+    _fields_ = [
+        ("dx", wintypes.LONG),
+        ("dy", wintypes.LONG),
+        ("mouseData", wintypes.DWORD),
+        ("dwFlags", wintypes.DWORD),
+        ("time", wintypes.DWORD),
+        ("dwExtraInfo", ctypes.c_void_p),
+    ]
+
+
+class _INPUTUNION(ctypes.Union):
+    _fields_ = [("mi", MOUSEINPUT), ("pad", ctypes.c_byte * 32)]
+
+
+class INPUT(ctypes.Structure):
+    _fields_ = [("type", ctypes.c_ulong), ("u", _INPUTUNION)]
+
+
+user32 = ctypes.WinDLL("user32", use_last_error=True) if IS_WIN else None
+
+if IS_WIN:
+    user32.SendInput.argtypes = [wintypes.UINT, ctypes.POINTER(INPUT), ctypes.c_int]
+    user32.SendInput.restype = wintypes.UINT
+    user32.SetCursorPos.argtypes = [ctypes.c_int, ctypes.c_int]
+    user32.SetCursorPos.restype = wintypes.BOOL
+    user32.GetCursorPos.argtypes = [ctypes.POINTER(wintypes.POINT)]
+    user32.SetWindowDisplayAffinity.argtypes = [wintypes.HWND, wintypes.DWORD]
+    user32.RegisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int, wintypes.UINT, wintypes.UINT]
+    user32.UnregisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int]
+    user32.GetAsyncKeyState.argtypes = [ctypes.c_int]
+    user32.GetAsyncKeyState.restype = ctypes.c_short
+
+
+def send_wheel(notches: int) -> bool:
+    """notches سالب = تمرير للأسفل. يستخدم SendInput (لا mouse_event المهجورة)."""
+    if not IS_WIN or not notches:
+        return False
+    inp = INPUT(type=INPUT_MOUSE)
+    inp.u.mi = MOUSEINPUT(0, 0, (int(notches) * 120) & 0xFFFFFFFF, MOUSEEVENTF_WHEEL, 0, None)
+    sent = user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
+    if sent != 1:
+        log.debug("SendInput failed: %s", ctypes.get_last_error())
+    return sent == 1
+
+
+def cursor_pos() -> tuple[int, int]:
+    if not IS_WIN:
+        return (0, 0)
+    point = wintypes.POINT()
+    user32.GetCursorPos(ctypes.byref(point))
+    return (point.x, point.y)
+
+
+def set_cursor(x: int, y: int) -> None:
+    if IS_WIN:
+        user32.SetCursorPos(int(x), int(y))
+
+
+def esc_pressed() -> bool:
+    return bool(IS_WIN and (user32.GetAsyncKeyState(VK_ESCAPE) & 0x8000))
+
+
+def exclude_from_capture(win_id: int) -> None:
+    """يخفي نافذة من الالتقاط (ويندوز 10 2004+). فشله لا يعطّل شيئًا."""
+    if not IS_WIN:
+        return
+    try:
+        if not user32.SetWindowDisplayAffinity(wintypes.HWND(int(win_id)), WDA_EXCLUDEFROMCAPTURE):
+            log.debug("SetWindowDisplayAffinity failed: %s", ctypes.get_last_error())
+    except Exception:  # noqa: BLE001 - مجرد تحسين بصري
+        log.debug("SetWindowDisplayAffinity unavailable", exc_info=True)
+
+
+_KEYS = {
+    "ctrl": MOD_CONTROL, "control": MOD_CONTROL,
+    "shift": MOD_SHIFT, "alt": MOD_ALT, "win": MOD_WIN, "meta": MOD_WIN,
+}
+
+
+def parse_hotkey(sequence: str) -> tuple[int, int]:
+    mods, vk = 0, 0
+    for part in sequence.replace(" ", "").split("+"):
+        token = part.lower()
+        if token in _KEYS:
+            mods |= _KEYS[token]
+        elif len(token) == 1 and token.isalnum():
+            vk = ord(token.upper())
+        elif token.startswith("f") and token[1:].isdigit():
+            vk = 0x70 + int(token[1:]) - 1
+    return mods, vk
+
+
+def register_hotkey(hwnd: int, hotkey_id: int, sequence: str) -> bool:
+    if not IS_WIN:
+        return False
+    mods, vk = parse_hotkey(sequence)
+    if not vk:
+        log.warning("نص اختصار غير صالح: %s", sequence)
+        return False
+    ok = user32.RegisterHotKey(wintypes.HWND(int(hwnd)), hotkey_id, mods | MOD_NOREPEAT, vk)
+    if not ok:
+        log.warning("RegisterHotKey(%s) failed: %s", sequence, ctypes.get_last_error())
+    return bool(ok)
+
+
+def unregister_hotkey(hwnd: int, hotkey_id: int) -> None:
+    if IS_WIN and hwnd:
+        user32.UnregisterHotKey(wintypes.HWND(int(hwnd)), hotkey_id)
+`,
+  },
+  {
+    path: 'scrollsnip/geometry.py',
+    name: 'geometry.py',
+    category: 'core',
+    descriptionAr: 'تحويل DPI دقيق: إحداثيات منطقية (Qt) ↔ بكسل فعلي (mss)',
+    descriptionEn: 'Accurate DPI conversion: Qt logical DIPs to physical pixels for mss',
+    code: `"""تحويل الإحداثيات منطقي (Qt/DIP) ↔ بكسل فعلي (mss)."""
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass
+
+import mss
+from PySide6.QtCore import QRect
+from PySide6.QtGui import QGuiApplication
+
+log = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class PhysicalRect:
+    left: int
+    top: int
+    width: int
+    height: int
+
+    def as_mss(self) -> dict:
+        return {"left": self.left, "top": self.top, "width": self.width, "height": self.height}
+
+
+def monitors() -> list[dict]:
+    with mss.mss() as sct:
+        return list(sct.monitors[1:])
+
+
+def _match_monitor(screen, dpr: float) -> dict:
+    geo = screen.geometry()
+    found = monitors()
+    want_w, want_h = geo.width() * dpr, geo.height() * dpr
+    for mon in found:
+        if abs(mon["width"] - want_w) <= 2 and abs(mon["height"] - want_h) <= 2:
+            return mon
+    log.warning("لم أطابق شاشة Qt بمراقب mss (dpr=%s) — سأستخدم الأقرب", dpr)
+    return min(found, key=lambda m: abs(m["width"] - want_w) + abs(m["height"] - want_h))
+
+
+def physical_rect(rect: QRect) -> PhysicalRect:
+    """منطقة منطقية عالمية → بكسل فعلي، مع مراعاة الـ DPI وأصل الشاشة (قد يكون سالبًا)."""
+    screen = QGuiApplication.screenAt(rect.center()) or QGuiApplication.primaryScreen()
+    dpr = float(screen.devicePixelRatio() or 1.0)
+    geo = screen.geometry()
+    mon = _match_monitor(screen, dpr)
+
+    left = mon["left"] + round((rect.x() - geo.x()) * dpr)
+    top = mon["top"] + round((rect.y() - geo.y()) * dpr)
+    width = round(rect.width() * dpr)
+    height = round(rect.height() * dpr)
+
+    right = mon["left"] + mon["width"]
+    bottom = mon["top"] + mon["height"]
+    left = max(mon["left"], min(left, right - 1))
+    top = max(mon["top"], min(top, bottom - 1))
+    width = max(1, min(width, right - left))
+    height = max(1, min(height, bottom - top))
+    return PhysicalRect(left, top, width, height)
+
+
+def screen_physical(screen) -> PhysicalRect:
+    dpr = float(screen.devicePixelRatio() or 1.0)
+    mon = _match_monitor(screen, dpr)
+    return PhysicalRect(mon["left"], mon["top"], mon["width"], mon["height"])
+`,
+  },
+  {
+    path: 'scrollsnip/i18n.py',
+    name: 'i18n.py',
+    category: 'core',
+    descriptionAr: 'نظام ترجمة ثنائي اللغة مع دعم صيغ الجموع العربية الست كاملة',
+    descriptionEn: 'Bilingual i18n system with accurate 6-form Arabic pluralization',
+    code: `"""ترجمة مع إشارة تغيير لغوي وجموع عربية صحيحة."""
+from __future__ import annotations
+
+from PySide6.QtCore import QObject, Signal
+
+STRINGS: dict[str, dict] = {
+    "en": {
+        "tagline": "Capture anything, even beyond the screen",
+        "region": "Region capture", "region_sub": "Drag to select an area",
+        "scroll": "Scrolling capture", "scroll_sub": "Select an area and capture it beyond the screen",
+        "full": "Full screen", "full_sub": "Capture the entire current monitor",
+        "settings": "Capture options",
+        "delay": "Delay", "no_delay": "None", "seconds": "{n} seconds",
+        "mode": "Scroll mode", "auto": "Automatic", "manual": "Manual (I scroll)",
+        "copy_auto": "Copy to clipboard automatically", "save_auto": "Save automatically",
+        "folder": "Save folder", "change": "Change", "open": "Open",
+        "hotkeys": "Hotkeys:  Ctrl+Shift+S region  ·  Ctrl+Shift+W scrolling  ·  Ctrl+Shift+F full screen",
+        "language": "Language",
+        "frames": "{n} frames", "pixels": "{n}px",
+        "hud_auto": "Scrolling…  {frames} · {pixels}  —  Esc to finish",
+        "hud_manual": "Scroll the content yourself…  {frames} · {pixels}  —  Esc to finish",
+        "finish": "Finish",
+        "hint_region": "Drag to select  ·  Esc to cancel",
+        "hint_scroll": "Select the scrollable area  ·  Esc to cancel",
+        "pen": "Pen", "highlighter": "Highlighter", "rect": "Rectangle", "arrow": "Arrow", "text": "Text",
+        "undo": "Undo", "redo": "Redo", "copy": "Copy", "save": "Save", "save_as": "Save as…",
+        "new": "New capture", "fit": "Fit", "actual": "100%", "size": "Size", "color": "Color",
+        "saved": "Saved: {p}", "copied": "Copied to clipboard", "save_failed": "Could not save the file",
+        "no_scroll": "Nothing scrolled inside the selected area. Make sure it is scrollable, or try manual mode.",
+        "limit": "Maximum image size reached — the capture was truncated.",
+        "tray_running": "ScrollSnip is still running in the tray",
+        "enter_text": "Enter text", "quit": "Quit", "show": "Open",
+        "capturing_in": "Capture starts in {n}",
+        "unsaved_title": "Unsaved changes", "unsaved_msg": "Do you want to save the image before closing?",
+        "discard": "Discard", "cancel": "Cancel", "already_running": "ScrollSnip is already running.",
+        "hotkey_fail": "Could not register hotkey {k} (used by another program)",
+        "err": "Error: {e}", "editor_title": "Editor",
+    },
+    "ar": {
+        "tagline": "التقط أي شيء، حتى ما يتجاوز حدود الشاشة",
+        "region": "لقطة منطقة", "region_sub": "اسحب لتحديد جزء من الشاشة",
+        "scroll": "لقطة بالتمرير", "scroll_sub": "حدّد منطقة ليتم تمريرها والتقاطها كاملة",
+        "full": "الشاشة كاملة", "full_sub": "التقاط الشاشة الحالية بالكامل",
+        "settings": "خيارات الالتقاط",
+        "delay": "التأخير", "no_delay": "بدون", "seconds": "{n} ثانية",
+        "mode": "نمط التمرير", "auto": "تلقائي", "manual": "يدوي (أنا أمرّر)",
+        "copy_auto": "نسخ اللقطة للحافظة تلقائيًا", "save_auto": "حفظ اللقطة تلقائيًا",
+        "folder": "مجلد الحفظ", "change": "تغيير", "open": "فتح",
+        "hotkeys": "الاختصارات:  Ctrl+Shift+S منطقة  ·  Ctrl+Shift+W تمرير  ·  Ctrl+Shift+F شاشة كاملة",
+        "language": "اللغة",
+        "frames": {"one": "إطار واحد", "two": "إطاران", "few": "{n} إطارات",
+                   "many": "{n} إطارًا", "other": "{n} إطار"},
+        "pixels": {"one": "بكسل واحد", "two": "بكسلان", "few": "{n} بكسلات",
+                   "many": "{n} بكسلًا", "other": "{n} بكسل"},
+        "hud_auto": "جارٍ التمرير…  {frames} · {pixels}  —  Esc للإنهاء",
+        "hud_manual": "مرّر المحتوى بنفسك…  {frames} · {pixels}  —  Esc للإنهاء",
+        "finish": "إنهاء",
+        "hint_region": "اسحب للتحديد  ·  Esc للإلغاء",
+        "hint_scroll": "حدّد المنطقة القابلة للتمرير  ·  Esc للإلغاء",
+        "pen": "قلم", "highlighter": "تمييز", "rect": "مستطيل", "arrow": "سهم", "text": "نص",
+        "undo": "تراجع", "redo": "إعادة", "copy": "نسخ", "save": "حفظ", "save_as": "حفظ باسم…",
+        "new": "لقطة جديدة", "fit": "ملاءمة", "actual": "100%", "size": "السُّمك", "color": "اللون",
+        "saved": "تم الحفظ: {p}", "copied": "تم النسخ إلى الحافظة", "save_failed": "تعذّر حفظ الملف",
+        "no_scroll": "لم يتحرك المحتوى داخل المنطقة. تأكد أنها قابلة للتمرير أو جرّب النمط اليدوي.",
+        "limit": "تم بلوغ الحد الأقصى لحجم الصورة — اقتُطع الطول.",
+        "tray_running": "ScrollSnip ما زال يعمل في شريط المهام",
+        "enter_text": "أدخل النص", "quit": "خروج", "show": "فتح",
+        "capturing_in": "ستبدأ اللقطة بعد {n}",
+        "unsaved_title": "تغييرات غير محفوظة", "unsaved_msg": "هل تريد حفظ الصورة قبل الإغلاق؟",
+        "discard": "تجاهل", "cancel": "إلغاء", "already_running": "ScrollSnip يعمل بالفعل.",
+        "hotkey_fail": "تعذّر تسجيل الاختصار {k} (مستخدم في برنامج آخر)",
+        "err": "حدث خطأ: {e}", "editor_title": "المحرر",
+    },
+}
+
+# الجموع العربية: واحد/مثنى/3-10/11-99/غير ذلك
+PLURALS = {"en": {"zero": "other", "one": "one", "two": "other", "few": "other",
+                  "many": "other", "other": "other"}}
+
+
+def arabic_form(n: int) -> str:
+    if n == 0:
+        return "zero"
+    if n == 1:
+        return "one"
+    if n == 2:
+        return "two"
+    if 3 <= n % 100 <= 10:
+        return "few"
+    if 11 <= n % 100 <= 99:
+        return "many"
+    return "other"
+
+
+class Translator(QObject):
+    changed = Signal()
+
+    def __init__(self, language: str = "ar") -> None:
+        super().__init__()
+        self._language = language
+        self._forms = PLURALS["en"]
+
+    @property
+    def language(self) -> str:
+        return self._language
+
+    @property
+    def is_rtl(self) -> bool:
+        return self._language == "ar"
+
+    def set_language(self, code: str) -> None:
+        if code not in STRINGS or code == self._language:
+            return
+        self._language = code
+        self.changed.emit()
+
+    def t(self, key: str, **kwargs) -> str:
+        table = STRINGS.get(self._language, STRINGS["en"])
+        value = table.get(key)
+        if value is None:
+            value = STRINGS["en"].get(key, key)
+        if isinstance(value, dict):
+            form = arabic_form(int(kwargs.get("n", 0))) if self.is_rtl else "other"
+            value = value.get(form) or value.get("other") or next(iter(value.values()))
+        try:
+            return value.format(**kwargs)
+        except (KeyError, IndexError, ValueError):
+            return value
+
+    def count(self, key: str, n: int) -> str:
+        return self.t(key, n=n)
+
+
+_translator: Translator | None = None
+
+
+def translator() -> Translator:
+    """كائن واحد يُنشأ بعد QApplication (حتى تعمل الإشارات)."""
+    global _translator
+    if _translator is None:
+        _translator = Translator()
+    return _translator
+
+
+def t(key: str, **kwargs) -> str:
+    return translator().t(key, **kwargs)
+`,
+  },
+  {
+    path: 'scrollsnip/theme.py',
+    name: 'theme.py',
+    category: 'gui',
+    descriptionAr: 'ثيم QSS داكن فخم مع لوحة ألوان متوازنة ومراعاة اتجاه RTL/LTR',
+    descriptionEn: 'Dark luxury QSS stylesheet and palette with clean RTL/LTR support',
+    code: `"""ثيم داكن. لا تحجيم يدوي لأي px: Qt6 يطبّق devicePixelRatio تلقائيًا."""
+from __future__ import annotations
+
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor, QFont, QPalette
+
+QSS = """
+QWidget { font-family: "Segoe UI", "Tahoma", sans-serif; font-size: 10pt; color: #e8eaed; }
+QMainWindow, QWidget#root { background: #1c1d21; }
+QLabel#title { font-size: 18pt; font-weight: 600; }
+QLabel#muted { color: #9aa0aa; }
+QLabel#cardTitle { font-size: 11pt; font-weight: 600; }
+QLabel#cardGlyph { font-size: 22pt; color: #4f8cff; }
+QFrame#panel { background: #25272c; border: 1px solid #30333a; border-radius: 12px; }
+QPushButton#card { background: #2a2c31; border: 1px solid #34363c; border-radius: 12px; padding: 0; }
+QPushButton#card:hover { background: #32353b; border-color: #4f8cff; }
+QPushButton#card:pressed { background: #2a3550; }
+QPushButton { background: #31343a; border: 1px solid #3a3d44; border-radius: 8px; padding: 6px 14px; }
+QPushButton:hover { background: #3a3e45; }
+QPushButton#primary { background: #4f8cff; border: none; color: white; font-weight: 600; padding: 7px 18px; }
+QPushButton#primary:hover { background: #6ba0ff; }
+QToolButton#tool { background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 6px 12px; }
+QToolButton#tool:hover { background: #2f3238; }
+QToolButton#tool:checked { background: #3b6fe0; color: white; }
+QToolButton#swatch { border: 2px solid #3a3d44; border-radius: 11px; min-width: 20px; max-width: 20px;
+                     min-height: 20px; max-height: 20px; }
+QToolButton#swatch:hover { border-color: #9aa0aa; }
+QToolButton#swatch:checked { border-color: #ffffff; }
+QComboBox { background: #2f3238; border: 1px solid #3a3d44; border-radius: 8px; padding: 5px 10px; min-width: 120px; }
+QComboBox::drop-down { border: none; width: 22px; }
+QComboBox QAbstractItemView { background: #2a2c31; border: 1px solid #3a3d44;
+                              selection-background-color: #3b6fe0; outline: none; }
+QLineEdit { background: #2a2c31; border: 1px solid #3a3d44; border-radius: 8px; padding: 5px 10px; color: #9aa0aa; }
+QCheckBox { spacing: 8px; }
+QCheckBox::indicator { width: 16px; height: 16px; border-radius: 5px; border: 1px solid #5a5e66; background: #2a2c31; }
+QCheckBox::indicator:checked { background: #4f8cff; border-color: #4f8cff; }
+QSlider::groove:horizontal { height: 4px; background: #3a3d44; border-radius: 2px; }
+QSlider::handle:horizontal { background: #4f8cff; width: 14px; height: 14px; margin: -5px 0; border-radius: 7px; }
+QScrollArea#canvasArea, QWidget#vp { background: #141518; border: none; }
+QScrollBar:vertical { background: transparent; width: 12px; }
+QScrollBar::handle:vertical { background: #4a4d55; border-radius: 5px; min-height: 30px; margin: 2px; }
+QScrollBar:horizontal { background: transparent; height: 12px; }
+QScrollBar::handle:horizontal { background: #4a4d55; border-radius: 5px; min-width: 30px; margin: 2px; }
+QScrollBar::add-line, QScrollBar::sub-line { height: 0; width: 0; }
+QStatusBar { background: #232529; color: #9aa0aa; }
+QFrame#hud { background: rgba(24, 25, 29, 235); border: 1px solid #4f8cff; border-radius: 12px; }
+QToolBar { background: #232529; border-bottom: 1px solid #30333a; spacing: 6px; padding: 6px; }
+QMenu { background: #2a2c31; border: 1px solid #3a3d44; padding: 4px; }
+QMenu::item { padding: 6px 22px; border-radius: 6px; }
+QMenu::item:selected { background: #3b6fe0; }
+"""
+
+
+def _palette() -> QPalette:
+    palette = QPalette()
+    palette.setColor(QPalette.Window, QColor("#1c1d21"))
+    palette.setColor(QPalette.WindowText, QColor("#e8eaed"))
+    palette.setColor(QPalette.Base, QColor("#141518"))
+    palette.setColor(QPalette.AlternateBase, QColor("#25272c"))
+    palette.setColor(QPalette.Text, QColor("#e8eaed"))
+    palette.setColor(QPalette.Button, QColor("#31343a"))
+    palette.setColor(QPalette.ButtonText, QColor("#e8eaed"))
+    palette.setColor(QPalette.Highlight, QColor("#4f8cff"))
+    palette.setColor(QPalette.HighlightedText, QColor("#ffffff"))
+    palette.setColor(QPalette.ToolTipBase, QColor("#25272c"))
+    palette.setColor(QPalette.ToolTipText, QColor("#e8eaed"))
+    return palette
+
+
+def apply_theme(app, rtl: bool) -> None:
+    app.setStyle("Fusion")
+    app.setPalette(_palette())
+    app.setStyleSheet(QSS)
+    font = QFont("Segoe UI", 10)
+    font.setStyleStrategy(QFont.PreferAntialias)
+    app.setFont(font)
+    app.setLayoutDirection(Qt.RightToLeft if rtl else Qt.LeftToRight)
+`,
+  },
+  {
+    path: 'scrollsnip/imaging.py',
+    name: 'imaging.py',
+    category: 'core',
+    descriptionAr: 'معالجة الصور والخوارزمية الذكية: كشف الإزاحة ومخزن التمرير المحدود',
+    descriptionEn: 'Core image processing: shift detection and bounded preallocated memory buffer',
+    code: `"""معالجة صور خالصة (بدون Qt) — قابلة للاختبار مباشرة."""
+from __future__ import annotations
+
+import cv2
+import numpy as np
+
+
+def detect_shift(prev_gray: np.ndarray, cur_gray: np.ndarray, target_width: int = 480) -> tuple[int, float]:
+    """يرجع (d, score) حيث cur[y] ≈ prev[y + d] بالبكسل الأصلي.
+
+    يعمل على صورة مصغّرة لأن matchTemplate على ارتفاع كامل مكلف جدًا.
+    """
+    if prev_gray is None or cur_gray is None:
+        return 0, 0.0
+    h, w = cur_gray.shape[:2]
+    if h < 20 or w < 20:
+        return 0, 0.0
+
+    scale = min(1.0, target_width / float(w))
+    if scale < 1.0:
+        size = (max(8, int(w * scale)), max(8, int(h * scale)))
+        cur = cv2.resize(cur_gray, size, interpolation=cv2.INTER_AREA)
+        prev = cv2.resize(prev_gray, (size[0], prev_gray.shape[0] and max(8, int(prev_gray.shape[0] * scale))),
+                          interpolation=cv2.INTER_AREA)
+        if prev.shape[1] != cur.shape[1]:
+            return 0, 0.0
+    else:
+        cur, prev = cur_gray, prev_gray
+
+    hs = cur.shape[0]
+    top, bottom = int(hs * 0.12), int(hs * 0.58)
+    if bottom - top < 10 or prev.shape[0] <= bottom - top:
+        return 0, 0.0
+
+    template = cur[top:bottom]
+    result = cv2.matchTemplate(prev, template, cv2.TM_CCOEFF_NORMED)
+    _, score, _, location = cv2.minMaxLoc(result)
+    return int(round((location[1] - top) / scale)), float(score)
+
+
+class ScrollBuffer:
+    """مخزن رأسي مخصّص مسبقًا: ذاكرة محدودة بلا إعادة تخصيص تربيعية."""
+
+    def __init__(self, width: int, height: int, max_bytes: int) -> None:
+        self.width = int(width)
+        self.max_rows = max(int(height), int(max_bytes // max(1, width * 4)))
+        self._buffer = np.empty((self.max_rows, self.width, 4), np.uint8)  # BGRA
+        self._written = 0
+
+    @property
+    def height(self) -> int:
+        return min(self._written, self.max_rows)
+
+    @property
+    def full(self) -> bool:
+        return self._written >= self.max_rows
+
+    def start(self, frame: np.ndarray) -> None:
+        rows = min(frame.shape[0], self.max_rows)
+        self._buffer[:rows] = frame[:rows]
+        self._written = rows
+
+    def append(self, frame: np.ndarray, rows: int) -> int:
+        take = min(int(rows), self.max_rows - self._written, frame.shape[0])
+        if take <= 0:
+            return 0
+        self._buffer[self._written:self._written + take] = frame[frame.shape[0] - take:]
+        self._written += take
+        return take
+
+    def to_rgb(self) -> np.ndarray:
+        view = self._buffer[:self.height]
+        return np.ascontiguousarray(view[:, :, :3][:, :, ::-1])
+`,
+  },
+  {
+    path: 'scrollsnip/capture.py',
+    name: 'capture.py',
+    category: 'core',
+    descriptionAr: 'التقاط الشاشة باستخدام mss والتحويل الآمن إلى QImage',
+    descriptionEn: 'Screen capture via mss with detached QImage buffer conversion',
+    code: `"""mss + تحويل إلى QImage (BGR→RGB، والنسخ لفصل الذاكرة)."""
+from __future__ import annotations
+
+import cv2
+import mss
+import numpy as np
+from PySide6.QtGui import QImage
+
+from .geometry import PhysicalRect
+
+
+def grab(rect: PhysicalRect) -> np.ndarray:
+    """إطار BGRA للمنطقة المحددة فقط (لا الشاشة كاملة)."""
+    with mss.mss() as sct:
+        shot = sct.grab(rect.as_mss())
+        return np.array(shot)  # نسخة مستقلة من ذاكرة mss
+
+
+def bgra_to_rgb(frame: np.ndarray) -> np.ndarray:
+    return np.ascontiguousarray(frame[:, :, :3][:, :, ::-1])
+
+
+def gray(frame: np.ndarray) -> np.ndarray:
+    return cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)
+
+
+def rgb_to_qimage(rgb: np.ndarray) -> QImage:
+    rgb = np.ascontiguousarray(rgb)
+    height, width = rgb.shape[:2]
+    image = QImage(rgb.data, width, height, rgb.strides[0], QImage.Format_RGB888)
+    return image.copy()  # .copy() يقطع الاعتماد على مخزن numpy
+
+
+def to_qimage(frame_bgra: np.ndarray) -> QImage:
+    return rgb_to_qimage(bgra_to_rgb(frame_bgra))
+`,
+  },
+  {
+    path: 'scrollsnip/uia.py',
+    name: 'uia.py',
+    category: 'windows',
+    descriptionAr: 'تمرير خلفي صامت عبر UI Automation ScrollPattern دون تحريك الفأرة',
+    descriptionEn: 'Silent UI Automation ScrollPattern scrolling without cursor displacement',
+    code: `"""تمرير عبر UI Automation (ScrollPattern) — اختياري بالكامل.
+
+الأفضل من حقن العجلة: لا يحرّك مؤشر المستخدم ولا يعاركه. أي فشل يعيد False
+فيسقط العامل إلى SendInput. يتطلب comtypes.
+"""
+from __future__ import annotations
+
+import logging
+
+log = logging.getLogger(__name__)
+
+_UIA_SCROLL_PATTERN_ID = 10004
+_SCROLL_AMOUNT_NO_AMOUNT = 0
+_SCROLL_AMOUNT_LARGE_INCREMENT = 2
+
+_state: dict[str, object] = {"checked": False, "automation": None}
+
+
+def _automation():
+    if _state["checked"]:
+        return _state["automation"]
+    _state["checked"] = True
+    try:
+        import comtypes.client
+        from comtypes.gen import UIAutomationClient as UIA  # noqa: F401
+
+        _state["automation"] = comtypes.client.CreateObject(
+            "{ff48dba4-60ef-4201-aa87-54103eef594e}", interface=UIA.IUIAutomation
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.info("UI Automation غير متاح: %s", exc)
+        _state["automation"] = None
+    return _state["automation"]
+
+
+def available() -> bool:
+    return _automation() is not None
+
+
+def scroll_down(x: int, y: int) -> bool:
+    automation = _automation()
+    if automation is None:
+        return False
+    try:
+        from ctypes import wintypes
+
+        from comtypes.gen import UIAutomationClient as UIA
+
+        element = automation.ElementFromPoint(wintypes.POINT(int(x), int(y)))
+        if element is None:
+            return False
+        pattern = element.GetCurrentPattern(_UIA_SCROLL_PATTERN_ID)
+        scroll = pattern.QueryInterface(UIA.IUIAutomationScrollPattern)
+        if not scroll.CurrentVerticallyScrollable:
+            return False
+        scroll.Scroll(_SCROLL_AMOUNT_NO_AMOUNT, _SCROLL_AMOUNT_LARGE_INCREMENT)
+        return True
+    except Exception:  # noqa: BLE001 - أي عنصر لا يدعم النمط
+        log.debug("UIA scroll failed", exc_info=True)
+        return False
+`,
+  },
+  {
+    path: 'scrollsnip/scroll.py',
+    name: 'scroll.py',
+    category: 'core',
+    descriptionAr: 'خيط عامل التمرير التلقائي: التتبع البصري ولصق الإطارات والتوقف التلقائي',
+    descriptionEn: 'Worker thread: visual offset tracking, frame stitching and auto-finish',
+    code: `"""عامل التمرير: كشف الإزاحة، لصق الجزء الجديد فقط، توقّف تلقائي عند النهاية."""
+from __future__ import annotations
+
+import logging
+import threading
+import time
+
+import mss
+from PySide6.QtCore import QObject, Signal, Slot
+
+from . import winapi
+from .constants import FRAME_INTERVAL_MS, MATCH_THRESHOLD, MAX_IMAGE_BYTES, MIN_SCROLL_PX
+from .geometry import PhysicalRect
+from .imaging import ScrollBuffer, detect_shift
+
+log = logging.getLogger(__name__)
+
+
+class ScrollWorker(QObject):
+    progress = Signal(int, int)       # إطارات، الارتفاع
+    notice = Signal(str)              # مفتاح نص
+    finished = Signal(object)         # ndarray RGB
+    failed = Signal(str)
+
+    def __init__(self, rect: PhysicalRect, mode: str = "auto",
+                 max_bytes: int = MAX_IMAGE_BYTES, interval_ms: int = FRAME_INTERVAL_MS) -> None:
+        super().__init__()
+        self._rect = rect
+        self._mode = mode
+        self._max_bytes = max_bytes
+        self._interval = max(0.05, interval_ms / 1000.0)
+        self._stop = threading.Event()
+
+    @Slot()
+    def request_stop(self) -> None:
+        self._stop.set()
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            self._run()
+        except Exception as exc:  # noqa: BLE001 - يُبلَّغ للواجهة
+            log.exception("فشل التمرير")
+            self.failed.emit(str(exc))
+
+    def _run(self) -> None:
+        monitor = self._rect.as_mss()
+        saved_cursor = winapi.cursor_pos()
+        # mss غير آمن بين الخيوط: كائن جديد داخل الخيط
+        with mss.mss() as sct:
+            first = self._grab(sct, monitor)
+            height, width = first.shape[:2]
+            buffer = ScrollBuffer(width, height, self._max_bytes)
+            buffer.start(first)
+
+            prev_gray = self._gray(first)
+            frames = 1
+            idle = 0
+            notches = 1
+            truncated = False
+            self.progress.emit(frames, buffer.height)
+
+            center = (monitor["left"] + monitor["width"] // 2, monitor["top"] + monitor["height"] // 2)
+            use_uia = self._mode == "auto" and self._uia_available()
+            try:
+                if self._mode == "auto":
+                    winapi.set_cursor(*center)
+
+                while not self._stop.is_set():
+                    started = time.perf_counter()
+
+                    if self._mode == "auto":
+                        if not self._auto_scroll(center, notches, use_uia):
+                            break
+                    else:
+                        time.sleep(self._interval)
+
+                    if self._stop.is_set():
+                        break
+
+                    frame = self._grab(sct, monitor)
+                    if frame is None:
+                        continue
+                    current_gray = self._gray(frame)
+                    shift, score = detect_shift(prev_gray, current_gray)
+                    prev_gray = current_gray
+
+                    if shift < MIN_SCROLL_PX or score < MATCH_THRESHOLD:
+                        idle += 1
+                        if self._mode == "auto" and idle >= 2:  # بلغنا نهاية المحتوى
+                            break
+                        continue
+
+                    idle = 0
+                    if self._mode == "auto":
+                        # معايرة تلقائية: نطلب ~55% من ارتفاع المنطقة لكل خطوة
+                        notches = max(1, min(6, round(height * 0.55 / max(shift, 1))))
+
+                    added = buffer.append(frame, shift)
+                    if added <= 0:
+                        truncated = True
+                        break
+                    frames += 1
+                    self.progress.emit(frames, buffer.height)
+                    if buffer.full:
+                        truncated = True
+                        break
+
+                    if self._mode == "manual":
+                        remaining = self._interval - (time.perf_counter() - started)
+                        if remaining > 0:
+                            time.sleep(remaining)
+            finally:
+                if self._mode == "auto":
+                    winapi.set_cursor(*saved_cursor)
+
+            if frames <= 1:
+                self.notice.emit("no_scroll")
+                self.finished.emit(None)
+                return
+            if truncated:
+                self.notice.emit("limit")
+            self.finished.emit(buffer.to_rgb())
+
+    @staticmethod
+    def _grab(sct, monitor):
+        try:
+            return __import__("numpy").array(sct.grab(monitor))
+        except Exception:  # noqa: BLE001
+            log.debug("grab failed", exc_info=True)
+            return None
+
+    @staticmethod
+    def _gray(frame):
+        import cv2
+
+        return cv2.cvtColor(frame, cv2.COLOR_BGRA2GRAY)
+
+    @staticmethod
+    def _uia_available() -> bool:
+        from . import uia
+
+        return uia.available()
+
+    def _auto_scroll(self, center: tuple[int, int], notches: int, use_uia: bool) -> bool:
+        if use_uia:
+            from . import uia
+
+            if uia.scroll_down(*center):
+                return True
+        return winapi.send_wheel(-notches)
+`,
+  },
+  {
+    path: 'scrollsnip/overlay.py',
+    name: 'overlay.py',
+    category: 'gui',
+    descriptionAr: 'واجهات التحديد الشفاف، عداد التأخير، وشريط HUD للتمرير المستبعد من الالتقاط',
+    descriptionEn: 'Selection overlay, countdown widget, and floating HUD excluded from capture',
+    code: `"""تحديد المنطقة، عدّاد التأخير، وشريط تقدّم التمرير."""
+from __future__ import annotations
+
+from PySide6.QtCore import QRect, QTimer, Qt, Signal
+from PySide6.QtGui import QColor, QFont, QGuiApplication, QPainter, QPen
+from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget)
+
+from . import winapi
+
+
+class RegionOverlay(QWidget):
+    selected = Signal(QRect)
+    cancelled = Signal()
+
+    def __init__(self, hint: str) -> None:
+        super().__init__(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setCursor(Qt.CrossCursor)
+        self.setMouseTracking(True)
+        self._hint = hint
+        self._origin = QGuiApplication.primaryScreen().virtualGeometry().topLeft()
+        self.setGeometry(QGuiApplication.primaryScreen().virtualGeometry())
+        self._start = None
+        self._current = None
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        winapi.exclude_from_capture(int(self.winId()))
+        self.raise_()
+        self.activateWindow()
+        self.grabKeyboard()
+
+    def _selection(self) -> QRect | None:
+        if self._start is None or self._current is None:
+            return None
+        rect = QRect(self._start, self._current).normalized()
+        return rect if rect.width() > 4 and rect.height() > 4 else None
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), QColor(8, 9, 12, 120))
+        selection = self._selection()
+        if selection:
+            local = selection.translated(-self._origin)
+            painter.setCompositionMode(QPainter.CompositionMode_Clear)
+            painter.fillRect(local, Qt.transparent)
+            painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
+            painter.setPen(QPen(QColor("#4f8cff"), 1.5))
+            painter.drawRect(local)
+            painter.setPen(QColor("#e8eaed"))
+            painter.setFont(QFont("Segoe UI", 9))
+            painter.drawText(local.adjusted(4, 0, 0, -6), Qt.AlignLeft | Qt.AlignBottom,
+                             f"{selection.width()} × {selection.height()}")
+        painter.setPen(QColor("#c8ccd4"))
+        painter.setFont(QFont("Segoe UI", 11))
+        painter.drawText(self.rect(), Qt.AlignCenter, self._hint)
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton:
+            self._start = event.position().toPoint()
+            self._current = self._start
+            self.update()
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._start is not None:
+            self._current = event.position().toPoint()
+            self.update()
+
+    def mouseReleaseEvent(self, event) -> None:
+        if event.button() != Qt.LeftButton:
+            return
+        selection = self._selection()
+        self.releaseKeyboard()
+        self.hide()
+        if selection:
+            self.selected.emit(selection.translated(self._origin))
+        else:
+            self.cancelled.emit()
+        self.deleteLater()
+
+    def keyPressEvent(self, event) -> None:
+        if event.key() == Qt.Key_Escape:
+            self.releaseKeyboard()
+            self.hide()
+            self.cancelled.emit()
+            self.deleteLater()
+
+
+class Countdown(QWidget):
+    done = Signal()
+
+    def __init__(self, seconds: int) -> None:
+        super().__init__(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self._left = seconds
+        self._label = QLabel(str(seconds), self)
+        self._label.setAlignment(Qt.AlignCenter)
+        self._label.setStyleSheet(
+            "background: rgba(24,25,29,235); border: 1px solid #4f8cff; border-radius: 16px;"
+            "font-size: 34pt; font-weight: 600; color: #e8eaed; padding: 18px 34px;"
+        )
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self._label)
+        self.adjustSize()
+        screen = QGuiApplication.primaryScreen().availableGeometry()
+        self.move(screen.center() - self.rect().center())
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._tick)
+        self._timer.start(1000)
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        winapi.exclude_from_capture(int(self.winId()))
+
+    def _tick(self) -> None:
+        self._left -= 1
+        if self._left <= 0:
+            self._timer.stop()
+            self.hide()
+            self.deleteLater()
+            self.done.emit()
+            return
+        self._label.setText(str(self._left))
+
+
+class ScrollHud(QFrame):
+    finish_clicked = Signal()
+
+    def __init__(self) -> None:
+        super().__init__(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+        self.setObjectName("hud")
+        self._label = QLabel()
+        self._label.setWordWrap(True)
+        self._button = QPushButton()
+        self._button.setObjectName("primary")
+        self._button.clicked.connect(self.finish_clicked.emit)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(16, 12, 16, 12)
+        layout.setSpacing(12)
+        layout.addWidget(self._label, 1)
+        layout.addWidget(self._button)
+
+        screen = QGuiApplication.primaryScreen().availableGeometry()
+        self.setFixedWidth(min(560, screen.width() - 120))
+        self.adjustSize()
+        self.move(screen.center().x() - self.width() // 2, screen.top() + 40)
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        winapi.exclude_from_capture(int(self.winId()))
+
+    def update_text(self, text: str, finish_text: str) -> None:
+        self._label.setText(text)
+        self._button.setText(finish_text)
+        self.adjustSize()
+`,
+  },
+  {
+    path: 'scrollsnip/editor.py',
+    name: 'editor.py',
+    category: 'gui',
+    descriptionAr: 'المحرر المدمج: قلم، تمييز، مستطيل، سهم، نص، تكبير، تراجع، نسخ وحفظ',
+    descriptionEn: 'Built-in annotations editor: pen, highlighter, rectangle, arrow, text, zoom, copy, save',
+    code: `"""المحرر المدمج: قلم، تمييز، مستطيل، سهم، نص، تراجع/إعادة، تكبير."""
+from __future__ import annotations
+
+import datetime as dt
+import os
+from dataclasses import dataclass, field
+
+from PySide6.QtCore import QPoint, QPointF, QRect, Qt, Signal
+from PySide6.QtGui import (QAction, QColor, QGuiApplication, QImage, QPainter, QPen, QPixmap,
+                           QPolygonF)
+from PySide6.QtWidgets import (QApplication, QColorDialog, QFileDialog, QInputDialog, QLabel,
+                               QMainWindow, QScrollArea, QSlider, QToolBar, QToolButton, QWidget)
+
+from .i18n import translator
+
+SWATCHES = ["#ff4d4f", "#ffd60a", "#32d74b", "#4f8cff", "#ffffff"]
+
+
+@dataclass
+class Shape:
+    tool: str
+    color: QColor
+    width: int
+    points: list[QPointF] = field(default_factory=list)
+    text: str = ""
+
+
+def draw_shape(painter: QPainter, shape: Shape) -> None:
+    color = QColor(shape.color)
+    if shape.tool == "highlighter":
+        color.setAlpha(110)
+    pen = QPen(color, shape.width, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+    painter.setPen(pen)
+    painter.setBrush(Qt.NoBrush)
+
+    if shape.tool in ("pen", "highlighter"):
+        if len(shape.points) > 1:
+            painter.drawPolyline(QPolygonF(shape.points))
+        elif shape.points:
+            painter.setBrush(color)
+            painter.drawEllipse(shape.points[0], shape.width / 2, shape.width / 2)
+    elif shape.tool == "rect" and len(shape.points) >= 2:
+        painter.drawRect(QRect(shape.points[0].toPoint(), shape.points[-1].toPoint()).normalized())
+    elif shape.tool == "arrow" and len(shape.points) >= 2:
+        start, end = shape.points[0], shape.points[-1]
+        painter.drawLine(start, end)
+        painter.setBrush(color)
+        painter.setPen(Qt.NoPen)
+        painter.drawPolygon(arrow_head(start, end, shape.width))
+    elif shape.tool == "text" and shape.text and shape.points:
+        font = painter.font()
+        font.setPointSizeF(max(9.0, shape.width * 2.6))
+        font.setBold(True)
+        painter.setFont(font)
+        painter.setPen(color)
+        painter.drawText(shape.points[0], shape.text)
+
+
+def arrow_head(start: QPointF, end: QPointF, width: int) -> QPolygonF:
+    import math
+
+    angle = math.atan2(end.y() - start.y(), end.x() - start.x())
+    size = max(10.0, width * 4.0)
+    left = QPointF(end.x() - size * math.cos(angle - 0.45), end.y() - size * math.sin(angle - 0.45))
+    right = QPointF(end.x() - size * math.cos(angle + 0.45), end.y() - size * math.sin(angle + 0.45))
+    return QPolygonF([end, left, right])
+
+
+class ImageCanvas(QWidget):
+    changed = Signal()
+
+    def __init__(self, image: QImage) -> None:
+        super().__init__()
+        self._image = image
+        self._pixmap = QPixmap.fromImage(image)  # QPixmap على خيط الواجهة فقط
+        self._shapes: list[Shape] = []
+        self._redo: list[Shape] = []
+        self._draft: Shape | None = None
+        self._zoom = 1.0
+        self.tool = "pen"
+        self.color = QColor(SWATCHES[0])
+        self.width = 4
+        self.setMouseTracking(True)
+        self.setCursor(Qt.CrossCursor)
+        self._apply_size()
+
+    def _apply_size(self) -> None:
+        self.setFixedSize(int(self._pixmap.width() * self._zoom),
+                          int(self._pixmap.height() * self._zoom))
+
+    def set_zoom(self, zoom: float) -> None:
+        self._zoom = max(0.05, min(8.0, zoom))
+        self._apply_size()
+        self.update()
+
+    def zoom(self) -> float:
+        return self._zoom
+
+    def fit_zoom(self, viewport) -> float:
+        if not self._pixmap.width():
+            return 1.0
+        return min(viewport.width() / self._pixmap.width(),
+                   viewport.height() / self._pixmap.height(), 1.0)
+
+    def add_shape(self, shape: Shape) -> None:
+        self._shapes.append(shape)
+        self._redo.clear()
+        self.changed.emit()
+        self.update()
+
+    def undo(self) -> None:
+        if self._shapes:
+            self._redo.append(self._shapes.pop())
+            self.changed.emit()
+            self.update()
+
+    def redo(self) -> None:
+        if self._redo:
+            self._shapes.append(self._redo.pop())
+            self.changed.emit()
+            self.update()
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.scale(self._zoom, self._zoom)
+        painter.drawPixmap(0, 0, self._pixmap)
+        for shape in self._shapes:
+            draw_shape(painter, shape)
+        if self._draft:
+            draw_shape(painter, self._draft)
+
+    def _to_image(self, pos: QPoint) -> QPointF:
+        return QPointF(pos.x() / self._zoom, pos.y() / self._zoom)
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() != Qt.LeftButton:
+            return
+        point = self._to_image(event.position().toPoint())
+        if self.tool == "text":
+            text, ok = QInputDialog.getText(self, translator().t("enter_text"), translator().t("text"))
+            if ok and text.strip():
+                self.add_shape(Shape("text", self.color, self.width, [point], text.strip()))
+            return
+        self._draft = Shape(self.tool, QColor(self.color), self.width, [point])
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._draft is None:
+            return
+        point = self._to_image(event.position().toPoint())
+        if self._draft.tool in ("pen", "highlighter"):
+            self._draft.points.append(point)
+        else:
+            self._draft.points = self._draft.points[:1] + [point]
+        self.update()
+
+    def mouseReleaseEvent(self, event) -> None:
+        draft, self._draft = self._draft, None
+        if draft is None:
+            return
+        if len(draft.points) > 1 or draft.tool == "text":
+            self.add_shape(draft)
+        self.update()
+
+    def composited(self) -> QImage:
+        """صورة بالحجم الكامل (بكسل فعلي) بكل التوسيمات."""
+        output = QImage(self._image.size(), QImage.Format_ARGB32_Premultiplied)
+        output.fill(Qt.transparent)
+        painter = QPainter(output)
+        painter.drawImage(0, 0, self._image)
+        for shape in self._shapes:
+            draw_shape(painter, shape)
+        return output
+
+
+class EditorWindow(QMainWindow):
+    notice = Signal(str)
+
+    def __init__(self, image: QImage) -> None:
+        super().__init__()
+        self._tr = translator()
+        self.canvas = ImageCanvas(image)
+        self._scroll = QScrollArea()
+        self._scroll.setObjectName("canvasArea")
+        self._scroll.setWidget(self.canvas)
+        self._scroll.setWidgetResizable(False)
+        self._scroll.setAlignment(Qt.AlignCenter)
+        self.setCentralWidget(self._scroll)
+        self.setWindowTitle(self._tr.t("editor_title"))
+        self.resize(1040, 780)
+        self._build_toolbar()
+        self.retranslate()
+        self._tr.changed.connect(self.retranslate)
+        self._fit()
+
+    # ---------- أدوات ----------
+    def _build_toolbar(self) -> None:
+        bar = QToolBar()
+        bar.setMovable(False)
+        self.addToolBar(bar)
+        self._tool_buttons: dict[str, QToolButton] = {}
+        for tool in ("pen", "highlighter", "rect", "arrow", "text"):
+            button = QToolButton()
+            button.setObjectName("tool")
+            button.setCheckable(True)
+            button.setProperty("tool", tool)
+            button.clicked.connect(lambda _=False, t=tool: self._select_tool(t))
+            bar.addWidget(button)
+            self._tool_buttons[tool] = button
+        self._tool_buttons["pen"].setChecked(True)
+
+        bar.addSeparator()
+        self._swatch_group: list[QToolButton] = []
+        for color in SWATCHES:
+            button = QToolButton()
+            button.setObjectName("swatch")
+            button.setCheckable(True)
+            button.setStyleSheet(f"background-color: {color};")
+            button.clicked.connect(lambda _=False, c=color: self._select_color(c))
+            bar.addWidget(button)
+            self._swatch_group.append(button)
+        self._swatch_group[0].setChecked(True)
+
+        self._size = QSlider(Qt.Horizontal)
+        self._size.setRange(1, 30)
+        self._size.setValue(4)
+        self._size.setFixedWidth(110)
+        self._size.valueChanged.connect(self._set_width)
+        bar.addWidget(self._size)
+
+        bar.addSeparator()
+        self._undo_btn = QToolButton()
+        self._undo_btn.setObjectName("tool")
+        self._undo_btn.clicked.connect(self.canvas.undo)
+        bar.addWidget(self._undo_btn)
+        self._redo_btn = QToolButton()
+        self._redo_btn.setObjectName("tool")
+        self._redo_btn.clicked.connect(self.canvas.redo)
+        bar.addWidget(self._redo_btn)
+
+        bar.addSeparator()
+        self._fit_btn = QToolButton()
+        self._fit_btn.setObjectName("tool")
+        self._fit_btn.clicked.connect(self._fit)
+        bar.addWidget(self._fit_btn)
+        self._actual_btn = QToolButton()
+        self._actual_btn.setObjectName("tool")
+        self._actual_btn.clicked.connect(lambda: self.canvas.set_zoom(1.0))
+        bar.addWidget(self._actual_btn)
+
+        spacer = QWidget()
+        spacer.setSizePolicy(spacer.sizePolicy().horizontalPolicy(),
+                             spacer.sizePolicy().verticalPolicy())
+        bar.addWidget(spacer)
+        self._copy_btn = QToolButton()
+        self._copy_btn.setObjectName("tool")
+        self._copy_btn.clicked.connect(self.copy_to_clipboard)
+        bar.addWidget(self._copy_btn)
+        self._save_btn = QToolButton()
+        self._save_btn.setObjectName("tool")
+        self._save_btn.clicked.connect(lambda: self.save_to())
+        bar.addWidget(self._save_btn)
+        self._save_as_btn = QToolButton()
+        self._save_as_btn.setObjectName("tool")
+        self._save_as_btn.clicked.connect(self.save_as)
+        bar.addWidget(self._save_as_btn)
+
+    def _select_tool(self, tool: str) -> None:
+        self.canvas.tool = tool
+        for key, button in self._tool_buttons.items():
+            button.setChecked(key == tool)
+
+    def _select_color(self, color: str) -> None:
+        self.canvas.color = QColor(color)
+        for index, button in enumerate(self._swatch_group):
+            button.setChecked(SWATCHES[index] == color)
+
+    def _set_width(self, value: int) -> None:
+        self.canvas.width = value
+
+    def _fit(self) -> None:
+        self.canvas.set_zoom(self.canvas.fit_zoom(self._scroll.viewport()))
+
+    # ---------- ترجمة ----------
+    def retranslate(self) -> None:
+        self.setWindowTitle(self._tr.t("editor_title"))
+        for tool, button in self._tool_buttons.items():
+            button.setText(self._tr.t(tool))
+            button.setToolTip(self._tr.t(tool))
+        self._undo_btn.setText(self._tr.t("undo"))
+        self._redo_btn.setText(self._tr.t("redo"))
+        self._fit_btn.setText(self._tr.t("fit"))
+        self._actual_btn.setText(self._tr.t("actual"))
+        self._copy_btn.setText(self._tr.t("copy"))
+        self._save_btn.setText(self._tr.t("save"))
+        self._save_as_btn.setText(self._tr.t("save_as"))
+
+    # ---------- إخراج ----------
+    def copy_to_clipboard(self) -> None:
+        QGuiApplication.clipboard().setImage(self.canvas.composited())
+        self.notice.emit(self._tr.t("copied"))
+
+    def save_to(self, folder: str | None = None, path: str | None = None) -> str | None:
+        if path is None:
+            folder = folder or os.getcwd()
+            name = dt.datetime.now().strftime("ScrollSnip_%Y%m%d_%H%M%S.png")
+            path = os.path.join(folder, name)
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        if self.canvas.composited().save(path, "PNG"):
+            self.notice.emit(self._tr.t("saved", p=path))
+            return path
+        self.notice.emit(self._tr.t("save_failed"))
+        return None
+
+    def save_as(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(self, self._tr.t("save_as"), "", "PNG (*.png)")
+        if path:
+            self.save_to(path=path)
+`,
+  },
+  {
+    path: 'scrollsnip/mainwindow.py',
+    name: 'mainwindow.py',
+    category: 'gui',
+    descriptionAr: 'نافذة البداية الرئيسية: بطاقات الالتقاط الثلاث، الخيارات، وشريط الحالة',
+    descriptionEn: 'Main window: 3 capture cards, options grid, and status feedback',
+    code: `"""الواجهة الرئيسية: البطاقات، الخيارات، وشريط الحالة."""
+from __future__ import annotations
+
+import logging
+
+from PySide6.QtCore import QSettings, QThread, QTimer, Qt, Signal
+from PySide6.QtGui import QCursor, QGuiApplication
+from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFrame, QGridLayout,
+                               QHBoxLayout, QLabel, QLineEdit, QMainWindow, QPushButton,
+                               QVBoxLayout, QWidget)
+
+from . import capture, winapi
+from .constants import DEFAULT_SETTINGS, FRAME_INTERVAL_MS
+from .editor import EditorWindow
+from .geometry import physical_rect, screen_physical
+from .i18n import translator
+from .overlay import Countdown, RegionOverlay, ScrollHud
+from .scroll import ScrollWorker
+
+log = logging.getLogger(__name__)
+
+
+class Card(QPushButton):
+    def __init__(self, kind: str, glyph: str) -> None:
+        super().__init__()
+        self.setObjectName("card")
+        self.setProperty("kind", kind)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setMinimumHeight(140)
+        self.glyph = QLabel(glyph)
+        self.glyph.setObjectName("cardGlyph")
+        self.title = QLabel()
+        self.title.setObjectName("cardTitle")
+        self.sub = QLabel()
+        self.sub.setObjectName("muted")
+        self.sub.setWordWrap(True)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(6)
+        layout.addWidget(self.glyph)
+        layout.addWidget(self.title)
+        layout.addWidget(self.sub)
+        layout.addStretch(1)
+
+    def apply_direction(self, rtl: bool) -> None:
+        align = Qt.AlignRight if rtl else Qt.AlignLeft
+        for label in (self.glyph, self.title, self.sub):
+            label.setAlignment(align)
+
+
+class HomeWindow(QMainWindow):
+    def __init__(self, settings: QSettings) -> None:
+        super().__init__()
+        self._tr = translator()
+        self._settings = settings
+        self._busy = False
+        self._thread: QThread | None = None
+        self._worker: ScrollWorker | None = None
+        self._hud: ScrollHud | None = None
+        self._editor: EditorWindow | None = None
+        self._quitting = False
+        self._tray = False
+        self._build()
+        self.retranslate()
+        self._tr.changed.connect(self._on_language_changed)
+
+    # ---------- بناء ----------
+    def _build(self) -> None:
+        root = QWidget()
+        root.setObjectName("root")
+        self.setCentralWidget(root)
+        self.setMinimumWidth(760)
+        self.resize(880, 620)
+
+        outer = QVBoxLayout(root)
+        outer.setContentsMargins(26, 22, 26, 18)
+        outer.setSpacing(16)
+
+        header = QHBoxLayout()
+        self._title = QLabel("ScrollSnip")
+        self._title.setObjectName("title")
+        self._tagline = QLabel()
+        self._tagline.setObjectName("muted")
+        title_box = QVBoxLayout()
+        title_box.setSpacing(2)
+        title_box.addWidget(self._title)
+        title_box.addWidget(self._tagline)
+        header.addLayout(title_box, 1)
+        self._lang_label = QLabel()
+        self._lang_label.setObjectName("muted")
+        self.lang_combo = QComboBox()
+        self.lang_combo.addItem("العربية", "ar")
+        self.lang_combo.addItem("English", "en")
+        self.lang_combo.currentIndexChanged.connect(self._on_lang_picked)
+        header.addWidget(self._lang_label)
+        header.addWidget(self.lang_combo)
+        outer.addLayout(header)
+
+        cards = QHBoxLayout()
+        cards.setSpacing(12)
+        self.cards: dict[str, Card] = {
+            "region": Card("region", "▣"),
+            "scroll": Card("scroll", "↧"),
+            "full": Card("full", "▤"),
+        }
+        for kind, card in self.cards.items():
+            card.clicked.connect(lambda _=False, k=kind: self.trigger(k))
+            cards.addWidget(card, 1)
+        outer.addLayout(cards)
+
+        panel = QFrame()
+        panel.setObjectName("panel")
+        grid = QGridLayout(panel)
+        grid.setContentsMargins(18, 16, 18, 16)
+        grid.setHorizontalSpacing(14)
+        grid.setVerticalSpacing(12)
+
+        self._delay_label = QLabel()
+        self.delay_combo = QComboBox()
+        for seconds in (0, 1, 2, 3, 5, 10):
+            self.delay_combo.addItem("", seconds)
+        self.delay_combo.setCurrentIndex(0)
+
+        self._mode_label = QLabel()
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItem("", "auto")
+        self.mode_combo.addItem("", "manual")
+
+        self.copy_auto = QCheckBox()
+        self.save_auto = QCheckBox()
+
+        grid.addWidget(self._delay_label, 0, 0)
+        grid.addWidget(self.delay_combo, 0, 1)
+        grid.addWidget(self._mode_label, 0, 2)
+        grid.addWidget(self.mode_combo, 0, 3)
+        grid.addWidget(self.copy_auto, 1, 0, 1, 2)
+        grid.addWidget(self.save_auto, 1, 2, 1, 2)
+
+        self._folder_label = QLabel()
+        self.folder_edit = QLineEdit()
+        self.folder_edit.setReadOnly(True)
+        self._change_btn = QPushButton()
+        self._open_btn = QPushButton()
+        self._change_btn.clicked.connect(self._pick_folder)
+        self._open_btn.clicked.connect(self._open_folder)
+        folder_row = QHBoxLayout()
+        folder_row.setSpacing(8)
+        folder_row.addWidget(self.folder_edit, 1)
+        folder_row.addWidget(self._change_btn)
+        folder_row.addWidget(self._open_btn)
+        grid.addWidget(self._folder_label, 2, 0)
+        grid.addLayout(folder_row, 2, 1, 1, 3)
+        grid.setColumnStretch(1, 1)
+        grid.setColumnStretch(3, 1)
+        outer.addWidget(panel)
+
+        self._hotkeys = QLabel()
+        self._hotkeys.setObjectName("muted")
+        self._hotkeys.setAlignment(Qt.AlignCenter)
+        outer.addWidget(self._hotkeys)
+        outer.addStretch(1)
+
+        self.statusBar().showMessage("")
+        self._load_settings()
+
+    def _load_settings(self) -> None:
+        s = self._settings
+        self.lang_combo.setCurrentIndex(0 if self._tr.language == "ar" else 1)
+        index = self.delay_combo.findData(int(s.value("delay", DEFAULT_SETTINGS["delay"])))
+        self.delay_combo.setCurrentIndex(max(0, index))
+        index = self.mode_combo.findData(s.value("scroll_mode", DEFAULT_SETTINGS["scroll_mode"]))
+        self.mode_combo.setCurrentIndex(max(0, index))
+        self.copy_auto.setChecked(s.value("copy_auto", DEFAULT_SETTINGS["copy_auto"], bool))
+        self.save_auto.setChecked(s.value("save_auto", DEFAULT_SETTINGS["save_auto"], bool))
+        self.folder_edit.setText(s.value("save_dir", DEFAULT_SETTINGS["save_dir"]))
+        self.delay_combo.currentIndexChanged.connect(self._persist)
+        self.mode_combo.currentIndexChanged.connect(self._persist)
+        self.copy_auto.toggled.connect(self._persist)
+        self.save_auto.toggled.connect(self._persist)
+
+    def _persist(self, *_args) -> None:
+        s = self._settings
+        s.setValue("delay", self.delay_combo.currentData())
+        s.setValue("scroll_mode", self.mode_combo.currentData())
+        s.setValue("copy_auto", self.copy_auto.isChecked())
+        s.setValue("save_auto", self.save_auto.isChecked())
+        s.setValue("save_dir", self.folder_edit.text())
+
+    # ---------- ترجمة ----------
+    def retranslate(self) -> None:
+        tr = self._tr
+        self._tagline.setText(tr.t("tagline"))
+        self._lang_label.setText(tr.t("language"))
+        for kind, card in self.cards.items():
+            card.title.setText(tr.t(kind))
+            card.sub.setText(tr.t(f"{kind}_sub"))
+            card.apply_direction(tr.is_rtl)
+        self._delay_label.setText(tr.t("delay"))
+        for index in range(self.delay_combo.count()):
+            seconds = self.delay_combo.itemData(index)
+            self.delay_combo.setItemText(
+                index, tr.t("no_delay") if not seconds else tr.t("seconds", n=seconds))
+        self._mode_label.setText(tr.t("mode"))
+        self.mode_combo.setItemText(0, tr.t("auto"))
+        self.mode_combo.setItemText(1, tr.t("manual"))
+        self.copy_auto.setText(tr.t("copy_auto"))
+        self.save_auto.setText(tr.t("save_auto"))
+        self._folder_label.setText(tr.t("folder"))
+        self._change_btn.setText(tr.t("change"))
+        self._open_btn.setText(tr.t("open"))
+        self._hotkeys.setText(tr.t("hotkeys"))
+
+    def _on_lang_picked(self, index: int) -> None:
+        code = self.lang_combo.itemData(index)
+        self._settings.setValue("language", code)
+        self._tr.set_language(code)
+
+    def _on_language_changed(self) -> None:
+        from PySide6.QtCore import Qt as QtCore_Qt
+
+        QApplication.instance().setLayoutDirection(
+            QtCore_Qt.RightToLeft if self._tr.is_rtl else QtCore_Qt.LeftToRight)
+        self.retranslate()
+        if self._editor is not None:
+            self._editor.retranslate()
+
+    # ---------- مجلد ----------
+    def _pick_folder(self) -> None:
+        from PySide6.QtWidgets import QFileDialog
+
+        path = QFileDialog.getExistingDirectory(self, self._tr.t("folder"), self.folder_edit.text())
+        if path:
+            self.folder_edit.setText(path)
+            self._persist()
+
+    def _open_folder(self) -> None:
+        import os
+
+        path = self.folder_edit.text()
+        os.makedirs(path, exist_ok=True)
+        from PySide6.QtGui import QDesktopServices
+        from PySide6.QtCore import QUrl
+
+        QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+
+    # ---------- التدفق ----------
+    def trigger(self, kind: str) -> None:
+        if self._busy:
+            return
+        self._busy = True
+        self._kind = kind
+        delay = int(self.delay_combo.currentData() or 0)
+        self.hide()
+        if delay:
+            countdown = Countdown(delay)
+            countdown.done.connect(self._begin)
+            countdown.show()
+        else:
+            QTimer.singleShot(120, self._begin)
+
+    def _begin(self) -> None:
+        if self._kind == "full":
+            screen = QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
+            self._grab_region(screen_physical(screen), "region")
+            return
+        hint = self._tr.t("hint_scroll" if self._kind == "scroll" else "hint_region")
+        overlay = RegionOverlay(hint)
+        overlay.selected.connect(lambda rect: self._grab_region(physical_rect(rect), self._kind))
+        overlay.cancelled.connect(self._reset)
+        overlay.show()
+
+    def _grab_region(self, rect, kind: str) -> None:
+        QTimer.singleShot(160, lambda: self._do_grab(rect, kind))
+
+    def _do_grab(self, rect, kind: str) -> None:
+        if kind == "scroll":
+            self._start_scroll(rect)
+            return
+        try:
+            self._open_editor(capture.to_qimage(capture.grab(rect)))
+        except Exception as exc:  # noqa: BLE001
+            log.exception("فشل الالتقاط")
+            self._reset(self._tr.t("err", e=exc))
+
+    def _open_editor(self, image) -> None:
+        self._busy = False
+        self.show()
+        self.raise_()
+        self.activateWindow()
+        if image is None or image.isNull():
+            return
+        if self._editor is not None:
+            self._editor.close()
+        self._editor = EditorWindow(image)
+        self._editor.notice.connect(lambda msg: self.statusBar().showMessage(msg, 5000))
+        self._editor.show()
+        if self.save_auto.isChecked():
+            self._editor.save_to(self.folder_edit.text())
+        if self.copy_auto.isChecked():
+            self._editor.copy_to_clipboard()
+
+    def _reset(self, message: str = "") -> None:
+        self._busy = False
+        self.show()
+        self.raise_()
+        if message:
+            self.statusBar().showMessage(message, 6000)
+
+    # ---------- التمرير ----------
+    def _start_scroll(self, rect) -> None:
+        self._hud = ScrollHud()
+        self._hud.finish_clicked.connect(lambda: self._worker and self._worker.request_stop())
+        self._hud.show()
+
+        self._thread = QThread(self)
+        self._worker = ScrollWorker(rect, mode=str(self.mode_combo.currentData() or "auto"))
+        self._worker.moveToThread(self._thread)
+        self._thread.started.connect(self._worker.run)
+        self._worker.progress.connect(self._on_progress)
+        self._worker.notice.connect(self._on_notice)
+        self._worker.finished.connect(self._on_scroll_finished)
+        self._worker.failed.connect(self._on_scroll_failed)
+        self._thread.start()
+
+        self._center = (rect.left + rect.width // 2, rect.top + rect.height // 2)
+        self._esc_timer = QTimer(self)
+        self._esc_timer.timeout.connect(self._poll_stop)
+        self._esc_timer.start(120)
+
+    def _poll_stop(self) -> None:
+        if not self._worker:
+            return
+        if winapi.esc_pressed():
+            self._worker.request_stop()
+            return
+        if str(self.mode_combo.currentData()) == "auto":
+            x, y = winapi.cursor_pos()
+            if abs(x - self._center[0]) > 60 or abs(y - self._center[1]) > 60:
+                # المستخدم أمسك الفأرة: نتوقف بدل معاركته
+                self._worker.request_stop()
+
+    def _on_progress(self, frames: int, height: int) -> None:
+        if not self._hud:
+            return
+        template = self._tr.t("hud_auto" if str(self.mode_combo.currentData()) == "auto" else "hud_manual")
+        text = template.format(frames=self._tr.count("frames", frames),
+                              pixels=self._tr.count("pixels", height))
+        self._hud.update_text(text, self._tr.t("finish"))
+
+    def _on_notice(self, key: str) -> None:
+        self.statusBar().showMessage(self._tr.t(key), 6000)
+
+    def _stop_thread(self) -> None:
+        if self._esc_timer:
+            self._esc_timer.stop()
+        if self._thread:
+            self._thread.quit()
+            self._thread.wait(2000)
+            self._thread = None
+        self._worker = None
+        if self._hud:
+            self._hud.close()
+            self._hud = None
+
+    def _on_scroll_failed(self, message: str) -> None:
+        self._stop_thread()
+        self._reset(self._tr.t("err", e=message))
+
+    def _on_scroll_finished(self, rgb) -> None:
+        self._stop_thread()
+        if rgb is None:
+            self._reset(self._tr.t("no_scroll"))
+            return
+        self._open_editor(capture.rgb_to_qimage(rgb))
+
+    # ---------- شريط المهام ----------
+    def set_tray_available(self, available: bool) -> None:
+        self._tray = available
+
+    def quit(self) -> None:
+        self._quitting = True
+        self.close()
+
+    def closeEvent(self, event) -> None:
+        if self._tray and not self._quitting:
+            event.ignore()
+            self.hide()
+            self.statusBar().showMessage("")
+            return
+        event.accept()
+        QApplication.instance().quit()
+`,
+  },
+  {
+    path: 'scrollsnip/app.py',
+    name: 'app.py',
+    category: 'gui',
+    descriptionAr: 'نقطة الانطلاق: تفعيل Per-Monitor DPI v2، قفل النسخة، شريط المهام، والاختصارات',
+    descriptionEn: 'Entry point: Per-Monitor DPI v2, instance lock, system tray, and native hotkeys',
+    code: `"""التشغيل: DPI، تسجيل، قفل النسخة، شريط المهام، الاختصارات."""
+from __future__ import annotations
+
+import ctypes
+import logging
+import sys
+from ctypes import wintypes
+from logging.handlers import RotatingFileHandler
+
+from PySide6.QtCore import QAbstractNativeEventFilter, QLockFile, QObject, QSettings, QTimer, Qt
+from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
+from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
+
+from .constants import APP_NAME, DEFAULT_HOTKEYS, LOCK_PATH, LOG_PATH, ORG_NAME, IS_WIN
+from .mainwindow import HomeWindow
+from .theme import apply_theme
+from . import winapi
+from .i18n import translator
+
+log = logging.getLogger(__name__)
+
+HOTKEY_BASE_ID = 0xC0DE
+
+
+def setup_logging() -> None:
+    handler = RotatingFileHandler(LOG_PATH, maxBytes=1_000_000, backupCount=3, encoding="utf-8")
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)-7s %(name)s: %(message)s"))
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    root.addHandler(handler)
+    if sys.stderr:
+        root.addHandler(logging.StreamHandler())
+
+
+def enable_per_monitor_dpi() -> None:
+    """يجب أن يسبق إنشاء QApplication."""
+    if not IS_WIN:
+        return
+    try:
+        ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))  # PerMonitorV2
+    except Exception:  # noqa: BLE001
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(2)
+        except Exception:  # noqa: BLE001
+            log.info("DPI awareness غير متاح على هذا الإصدار")
+
+
+class HotkeyManager(QObject, QAbstractNativeEventFilter):
+    def __init__(self, window: HomeWindow, mapping: dict[str, str]) -> None:
+        super().__init__()
+        self._window = window
+        self._mapping = mapping
+        self._by_id = {HOTKEY_BASE_ID + index: kind for index, kind in enumerate(mapping)}
+        self._hwnd = 0
+        QApplication.instance().installNativeEventFilter(self)
+
+    def register(self) -> list[str]:
+        hwnd = int(self._window.winId())
+        if hwnd == self._hwnd:
+            return []
+        self.unregister()
+        self._hwnd = hwnd
+        failed = []
+        for index, (kind, sequence) in enumerate(self._mapping.items()):
+            if not winapi.register_hotkey(hwnd, HOTKEY_BASE_ID + index, sequence):
+                failed.append(sequence)
+        return failed
+
+    def unregister(self) -> None:
+        for hotkey_id in self._by_id:
+            winapi.unregister_hotkey(self._hwnd, hotkey_id)
+
+    def nativeEventFilter(self, event_type, message):
+        if event_type in (b"windows_generic_MSG", b"windows_dispatcher_MSG"):
+            try:
+                msg = wintypes.MSG.from_address(int(message))
+            except Exception:  # noqa: BLE001
+                return False, 0
+            if msg.message == winapi.WM_HOTKEY:
+                kind = self._by_id.get(int(msg.wParam))
+                if kind:
+                    QTimer.singleShot(0, lambda: self._window.trigger(kind))
+                    return True, 0
+        return False, 0
+
+
+def build_icon() -> QIcon:
+    pixmap = QPixmap(64, 64)
+    pixmap.fill(Qt.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing)
+    painter.setBrush(QColor("#4f8cff"))
+    painter.setPen(Qt.NoPen)
+    painter.drawRoundedRect(4, 4, 56, 56, 14, 14)
+    painter.setPen(QColor("#111318"))
+    painter.setBrush(Qt.NoBrush)
+    painter.drawRect(18, 18, 28, 28)
+    painter.end()
+    return QIcon(pixmap)
+
+
+def create_tray(app: QApplication, window: HomeWindow) -> QSystemTrayIcon:
+    tr = translator()
+    tray = QSystemTrayIcon(build_icon(), app)
+    menu = QMenu()
+    show_action = menu.addAction(tr.t("show"))
+    show_action.triggered.connect(lambda: (window.showNormal(), window.raise_(), window.activateWindow()))
+    menu.addSeparator()
+    quit_action = menu.addAction(tr.t("quit"))
+    quit_action.triggered.connect(window.quit)
+    tray.setContextMenu(menu)
+    tray.setToolTip(APP_NAME)
+    tray.activated.connect(
+        lambda reason: window.showNormal() if reason == QSystemTrayIcon.Trigger else None)
+    tr.changed.connect(lambda: (
+        show_action.setText(tr.t("show")),
+        quit_action.setText(tr.t("quit")),
+        tray.setToolTip(APP_NAME),
+    ))
+    tray.show()
+    app._tray = tray  # يمنع جمع القمامة
+    return tray
+
+
+def main() -> int:
+    enable_per_monitor_dpi()
+    setup_logging()
+
+    app = QApplication(sys.argv)
+    app.setOrganizationName(ORG_NAME)
+    app.setApplicationName(APP_NAME)
+    app.setQuitOnLastWindowClosed(False)  # لا نخرج فور النسخ
+
+    settings = QSettings()
+    tr = translator()
+    tr.set_language(str(settings.value("language", "ar")))
+    apply_theme(app, tr.is_rtl)
+
+    lock = QLockFile(LOCK_PATH)
+    lock.setStaleLockTime(0)
+    if not lock.tryLock(100):
+        QMessageBox.information(None, APP_NAME, tr.t("already_running"))
+        return 1
+    app._instance_lock = lock  # مرجع دائم، وإلا تحرّر القفل فورًا
+
+    window = HomeWindow(settings)
+    window.setWindowIcon(build_icon())
+    window.show()
+
+    tray_ok = QSystemTrayIcon.isSystemTrayAvailable()
+    if tray_ok:
+        create_tray(app, window)
+    window.set_tray_available(tray_ok)
+
+    manager = HotkeyManager(window, DEFAULT_HOTKEYS)
+    for sequence in manager.register():
+        window.statusBar().showMessage(tr.t("hotkey_fail", k=sequence), 8000)
+    app.aboutToQuit.connect(manager.unregister)
+
+    def excepthook(exc_type, exc_value, exc_tb):
+        log.exception("استثناء غير معالَج", exc_info=(exc_type, exc_value, exc_tb))
+        QMessageBox.critical(None, APP_NAME, tr.t("err", e=exc_value))
+
+    sys.excepthook = excepthook
+    return app.exec()
+`,
+  },
+  {
+    path: 'scrollsnip/__main__.py',
+    name: '__main__.py',
+    category: 'core',
+    descriptionAr: 'نقطة استدعاء تشغيل الحزمة مباشرة: python -m scrollsnip',
+    descriptionEn: 'Direct package execution runner: python -m scrollsnip',
+    code: `from scrollsnip.app import main
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+`,
+  },
+  {
+    path: 'tests/test_core.py',
+    name: 'test_core.py',
+    category: 'tests',
+    descriptionAr: 'اختبارات الوحدة pytest: كشف الإزاحة بدقة، مخزن الذاكرة، وقواعد الجموع',
+    descriptionEn: 'Unit tests with pytest: shift offset matching, memory buffer, and plural forms',
+    code: `import numpy as np
+
+from scrollsnip.imaging import ScrollBuffer, detect_shift
+from scrollsnip.i18n import arabic_form
+
+
+def _page(height=700, width=320):
+    rng = np.random.default_rng(7)
+    return rng.integers(0, 255, (height, width), dtype=np.uint8)
+
+
+def test_detect_shift_exact_offset():
+    page = _page()
+    prev, cur = page[:400], page[130:530]
+    shift, score = detect_shift(prev, cur, target_width=10_000)
+    assert score > 0.95
+    assert abs(shift - 130) <= 1
+
+
+def test_detect_shift_identical_frames_means_no_scroll():
+    page = _page()
+    shift, score = detect_shift(page[:400], page[:400], target_width=10_000)
+    assert shift == 0
+
+
+def test_buffer_appends_only_new_rows():
+    frame = np.zeros((300, 240, 4), np.uint8)
+    buffer = ScrollBuffer(240, 300, max_bytes=240 * 4 * 1000)
+    buffer.start(frame)
+    assert buffer.height == 300
+    assert buffer.append(np.ones((300, 240, 4), np.uint8), 50) == 50
+    assert buffer.height == 350
+    assert buffer.to_rgb().shape == (350, 240, 3)
+
+
+def test_arabic_plural_forms():
+    assert arabic_form(1) == "one"
+    assert arabic_form(2) == "two"
+    assert arabic_form(5) == "few"
+    assert arabic_form(15) == "many"
+`,
+  },
+  {
+    path: 'requirements.txt',
+    name: 'requirements.txt',
+    category: 'config',
+    descriptionAr: 'حزم بايثون المطلوبة (PySide6, mss, opencv-python, numpy, comtypes, pytest)',
+    descriptionEn: 'Python dependencies (PySide6, mss, opencv-python, numpy, comtypes, pytest)',
+    code: `PySide6>=6.5.0
+mss>=9.0.0
+opencv-python>=4.8.0
+numpy>=1.24.0
+comtypes>=1.2.0; sys_platform == 'win32'
+pytest>=7.4.0
+`,
+  },
+  {
+    path: 'README.md',
+    name: 'README.md',
+    category: 'config',
+    descriptionAr: 'دليل التثبيت، التشغيل، تشغيل الاختبارات، وبناء الملف التنفيذي exe',
+    descriptionEn: 'Installation guide, running instructions, tests, and PyInstaller exe build',
+    code: `# ScrollSnip v2.0.0
+
+أداة لقطات الشاشة المتطورة لنظام ويندوز مع دعم التمرير التلقائي، التكبير عالي الدقة (Per-Monitor DPI v2)، المحرر المدمج، ودعم كامل للغتين العربية والإنجليزية.
+
+## المميزات الأساسية
+1. لقطة بالتمرير التلقائي (Scrolling Capture) عبر خوارزمية cv2.matchTemplate
+2. مخزن ذاكرة آمن بسقف 256MB يمنع استنزاف الرام
+3. تكامل UI Automation و SendInput بدون تشتيت المؤشر
+4. محرر متكامل: أقلام، تمييز، مستطيلات، أسهم، نصوص، تراجع وإعادة، ونسخ فوري
+5. دعم كامل للعربية (RTL) وقواعد الجموع الصحيحة
+`,
+  },
+];

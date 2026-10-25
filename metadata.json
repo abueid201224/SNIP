@@ -1,0 +1,6 @@
+{
+  "name": "ScrollSnip - Scrolling Screenshot Tool",
+  "description": "أداة لقطات الشاشة المتطورة مع دعم التمرير التلقائي والمحرر المدمج واللغتين العربية والإنجليزية",
+  "requestFramePermissions": ["display-capture", "clipboard-read", "clipboard-write"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
